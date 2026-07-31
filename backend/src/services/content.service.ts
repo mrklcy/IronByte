@@ -21,7 +21,8 @@ export class ContentService {
   }
 
   async listChallenges(page: number, pageSize: number, search?: string) {
-    return this.content.listChallenges({ skip: (page - 1) * pageSize, take: pageSize, search });
+    const [total, challenges] = await this.content.listChallenges({ skip: (page - 1) * pageSize, take: pageSize, search });
+    return [total, challenges.map((challenge) => ({ ...challenge, flagHash: undefined }))] as const;
   }
 
   async getChallenge(slug: string) {

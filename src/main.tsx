@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -7,10 +7,8 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronDown,
-  CircleDot,
   Command,
   Flag,
-  Globe2,
   GraduationCap,
   HardDrive,
   Home,
@@ -29,10 +27,80 @@ import {
   Terminal,
   Trophy,
   Users,
+  XCircle,
 } from "lucide-react";
 import { Badge, Button, Card, Input, Progress, SectionHeader } from "./components/ui";
 import { cn } from "./lib/utils";
 import "./index.css";
+
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api/v1";
+const demoCredentials = { email: "ari@trainhack.local", password: "TrainHack123!" };
+
+type View = "dashboard" | "challenge" | "path";
+type Difficulty = "BEGINNER" | "EASY" | "MEDIUM" | "HARD" | "EXPERT";
+
+type ApiResponse<T> = {
+  success: boolean;
+  message: string;
+  data: T;
+  meta?: { total?: number };
+};
+
+type User = {
+  id: string;
+  email: string;
+  username: string;
+  displayName?: string | null;
+  xp: number;
+  level: number;
+};
+
+type Challenge = {
+  slug: string;
+  title: string;
+  description: string;
+  difficulty: Difficulty;
+  baseXp: number;
+  tags: string[];
+  category?: { name: string };
+  hints?: { id: string; title: string; penaltyPct: number; content?: string }[];
+};
+
+type Course = {
+  slug: string;
+  title: string;
+  summary: string;
+  difficulty: Difficulty;
+  modules: {
+    id: string;
+    title: string;
+    summary?: string | null;
+    lessons: { id: string; title: string; estimatedMinutes: number }[];
+  }[];
+};
+
+type Lab = {
+  slug: string;
+  name: string;
+  os: string;
+  description: string;
+  difficulty: Difficulty;
+  timeLimitMinutes: number;
+  category?: { name: string };
+};
+
+type AuthState = {
+  user: User | null;
+  accessToken: string;
+  refreshToken: string;
+};
+
+type AppData = {
+  challenges: Challenge[];
+  courses: Course[];
+  labs: Lab[];
+  leaderboard: User[];
+};
 
 const navItems = [
   ["Dashboard", Home],
@@ -46,34 +114,6 @@ const navItems = [
   ["Settings", Settings],
 ] as const;
 
-const progressAreas = [
-  { name: "Web Security", progress: 72, difficulty: "Intermediate", eta: "4h 20m", icon: Globe2 },
-  { name: "Reverse Engineering", progress: 38, difficulty: "Hard", eta: "8h 10m", icon: KeyRound },
-  { name: "Cryptography", progress: 64, difficulty: "Beginner", eta: "3h 45m", icon: Lock },
-  { name: "Forensics", progress: 51, difficulty: "Intermediate", eta: "5h 05m", icon: Search },
-  { name: "Binary Exploitation", progress: 27, difficulty: "Hard", eta: "10h 15m", icon: Terminal },
-  { name: "OSINT", progress: 84, difficulty: "Beginner", eta: "1h 30m", icon: CircleDot },
-];
-
-const challenges = [
-  { title: "Header Mirage", category: "Web Security", difficulty: "Easy", xp: 180, status: "In progress" },
-  { title: "Packed Signal", category: "Reverse Engineering", difficulty: "Hard", xp: 420, status: "Unsolved" },
-  { title: "Cipher Orchard", category: "Cryptography", difficulty: "Medium", xp: 260, status: "Solved" },
-];
-
-const labs = [
-  { name: "Apollo", os: "Ubuntu", difficulty: "Medium", status: "Running", ip: "10.10.14.28" },
-  { name: "Mica", os: "Windows", difficulty: "Hard", status: "Paused", ip: "10.10.14.44" },
-];
-
-const leaders = [
-  ["1", "nixwave", "18,920 XP", "JP"],
-  ["2", "ciphernova", "17,440 XP", "US"],
-  ["3", "rootkind", "16,850 XP", "DE"],
-  ["4", "packetlane", "15,780 XP", "PH"],
-  ["5", "hashcraft", "14,990 XP", "SG"],
-];
-
 const activities = [
   "Completed Header Mirage",
   "Earned Web Specialist badge",
@@ -81,28 +121,94 @@ const activities = [
   "Received Practical Forensics certificate",
 ];
 
-const modules = [
-  { title: "Recon Basics", state: "complete", time: "35m" },
-  { title: "Input Validation", state: "complete", time: "50m" },
-  { title: "Auth Bypass", state: "current", time: "1h 15m" },
-  { title: "Server-Side Requests", state: "locked", time: "1h 40m" },
-  { title: "Final CTF Sprint", state: "locked", time: "2h" },
-];
+function difficultyTone(difficulty?: Difficulty) {
+  if (difficulty === "HARD" || difficulty === "EXPERT") return "red";
+  if (difficulty === "MEDIUM") return "amber";
+  return "green";
+}
+
+async function api<T>(path: string, options: RequestInit & { token?: string } = {}) {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      ...options.headers,
+    },
+  });
+  const payload = (await response.json()) as ApiResponse<T>;
+  if (!response.ok || !payload.success) throw new Error(payload.message || "Request failed.");
+  return payload;
+}
 
 function App() {
   const [dark, setDark] = useState(false);
-  const [view, setView] = useState<"dashboard" | "challenge" | "path">("dashboard");
+  const [view, setView] = useState<View>("dashboard");
+  const [search, setSearch] = useState("");
+  const [selectedChallenge, setSelectedChallenge] = useState("header-mirage");
+  const [data, setData] = useState<AppData>({ challenges: [], courses: [], labs: [], leaderboard: [] });
+  const [auth, setAuth] = useState<AuthState>(() => {
+    const stored = localStorage.getItem("trainhack-auth");
+    return stored ? JSON.parse(stored) : { user: null, accessToken: "", refreshToken: "" };
+  });
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState("");
 
   useMemo(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+
+  useEffect(() => {
+    localStorage.setItem("trainhack-auth", JSON.stringify(auth));
+  }, [auth]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    Promise.all([
+      api<Challenge[]>(`/challenges?search=${encodeURIComponent(search)}`),
+      api<Course[]>(`/courses?search=${encodeURIComponent(search)}`),
+      api<Lab[]>(`/labs?search=${encodeURIComponent(search)}`),
+      api<User[]>("/leaderboard"),
+    ])
+      .then(([challenges, courses, labs, leaderboard]) => {
+        if (!active) return;
+        setData({
+          challenges: challenges.data,
+          courses: courses.data,
+          labs: labs.data,
+          leaderboard: leaderboard.data,
+        });
+        setNotice("");
+      })
+      .catch((error: Error) => active && setNotice(error.message))
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+    };
+  }, [search]);
+
+  useEffect(() => {
+    if (!auth.accessToken) return;
+    api<User>("/users/me", { token: auth.accessToken })
+      .then((payload) => setAuth((current) => ({ ...current, user: payload.data })))
+      .catch(() => setAuth({ user: null, accessToken: "", refreshToken: "" }));
+  }, [auth.accessToken]);
+
+  const challenge = data.challenges.find((item) => item.slug === selectedChallenge) ?? data.challenges[0];
+  const course = data.courses[0];
+
+  function openChallenge(slug?: string) {
+    if (slug) setSelectedChallenge(slug);
+    setView("challenge");
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="flex">
         <Sidebar view={view} setView={setView} />
         <main className="min-w-0 flex-1">
-          <Topbar dark={dark} setDark={setDark} />
+          <Topbar dark={dark} setDark={setDark} auth={auth} setAuth={setAuth} search={search} setSearch={setSearch} />
           <AnimatePresence mode="wait">
             <motion.div
               key={view}
@@ -112,9 +218,11 @@ function App() {
               transition={{ duration: 0.22 }}
               className="mx-auto max-w-[1480px] px-5 py-6 lg:px-8"
             >
-              {view === "dashboard" && <Dashboard setView={setView} />}
-              {view === "challenge" && <ChallengeDetail />}
-              {view === "path" && <LearningPath />}
+              {notice && <StatusPanel tone="error" message={notice} />}
+              {loading && <StatusPanel tone="info" message="Loading platform data..." />}
+              {view === "dashboard" && <Dashboard auth={auth} data={data} openChallenge={openChallenge} setView={setView} />}
+              {view === "challenge" && <ChallengeDetail auth={auth} setAuth={setAuth} challenge={challenge} />}
+              {view === "path" && <LearningPath course={course} />}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -123,7 +231,15 @@ function App() {
   );
 }
 
-function Sidebar({ view, setView }: { view: string; setView: (view: "dashboard" | "challenge" | "path") => void }) {
+function StatusPanel({ tone, message }: { tone: "info" | "error"; message: string }) {
+  return (
+    <div className={cn("mb-4 rounded-xl border px-4 py-3 text-sm font-semibold", tone === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-border bg-muted text-muted-foreground")}>
+      {message}
+    </div>
+  );
+}
+
+function Sidebar({ view, setView }: { view: string; setView: (view: View) => void }) {
   return (
     <aside className="sticky top-0 hidden h-screen w-72 shrink-0 border-r border-border bg-surface px-4 py-5 lg:block">
       <button onClick={() => setView("dashboard")} className="mb-8 flex w-full items-center gap-3 rounded-2xl px-2 text-left">
@@ -137,16 +253,12 @@ function Sidebar({ view, setView }: { view: string; setView: (view: "dashboard" 
       </button>
       <nav className="space-y-1" aria-label="Primary navigation">
         {navItems.map(([label, Icon]) => {
-          const active =
-            (label === "Dashboard" && view === "dashboard") ||
-            (label === "Challenges" && view === "challenge") ||
-            (label === "Learning Paths" && view === "path");
+          const target = label === "Challenges" ? "challenge" : label === "Learning Paths" ? "path" : "dashboard";
+          const active = view === target;
           return (
             <button
               key={label}
-              onClick={() =>
-                label === "Challenges" ? setView("challenge") : label === "Learning Paths" ? setView("path") : setView("dashboard")
-              }
+              onClick={() => setView(target)}
               className={cn(
                 "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-muted-foreground transition-colors",
                 active && "bg-primary/10 text-primary",
@@ -163,21 +275,37 @@ function Sidebar({ view, setView }: { view: string; setView: (view: "dashboard" 
   );
 }
 
-function Topbar({ dark, setDark }: { dark: boolean; setDark: (dark: boolean) => void }) {
+function Topbar({
+  dark,
+  setDark,
+  auth,
+  setAuth,
+  search,
+  setSearch,
+}: {
+  dark: boolean;
+  setDark: (dark: boolean) => void;
+  auth: AuthState;
+  setAuth: (auth: AuthState) => void;
+  search: string;
+  setSearch: (search: string) => void;
+}) {
+  const searchRef = useRef<HTMLInputElement>(null);
+
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/90 px-5 py-4 backdrop-blur lg:px-8">
       <div className="mx-auto flex max-w-[1480px] items-center gap-3">
         <div className="relative max-w-xl flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-10" placeholder="Search challenges, labs, paths..." aria-label="Search" />
+          <Input ref={searchRef} className="pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search challenges, labs, paths..." aria-label="Search" />
         </div>
-        <Button variant="outline" size="sm" className="hidden sm:inline-flex">
+        <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={() => searchRef.current?.focus()}>
           <Command className="h-4 w-4" />
           K
         </Button>
         <Button variant="soft" size="sm">
           <Sparkles className="h-4 w-4" />
-          12,480 XP
+          {auth.user ? `${auth.user.xp.toLocaleString()} XP` : "Guest"}
         </Button>
         <Button variant="ghost" size="icon" aria-label="Notifications">
           <Bell className="h-5 w-5" />
@@ -185,65 +313,80 @@ function Topbar({ dark, setDark }: { dark: boolean; setDark: (dark: boolean) => 
         <Button variant="ghost" size="icon" onClick={() => setDark(!dark)} aria-label="Toggle theme">
           {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </Button>
-        <button className="flex items-center gap-2 rounded-xl p-1 pr-2 hover:bg-muted" aria-label="Open user menu">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/15 text-sm font-bold text-teal-700">AR</span>
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        </button>
+        {auth.user ? (
+          <Button variant="outline" size="sm" onClick={() => setAuth({ user: null, accessToken: "", refreshToken: "" })}>
+            {auth.user.username}
+            <ChevronDown className="h-4 w-4" />
+          </Button>
+        ) : (
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/15 text-sm font-bold text-teal-700">GH</span>
+        )}
       </div>
     </header>
   );
 }
 
-function Dashboard({ setView }: { setView: (view: "dashboard" | "challenge" | "path") => void }) {
+function Dashboard({ auth, data, openChallenge, setView }: { auth: AuthState; data: AppData; openChallenge: (slug?: string) => void; setView: (view: View) => void }) {
+  const solved = auth.user?.xp ? Math.max(1, Math.floor(auth.user.xp / 180)) : 0;
+  const pathProgress = data.courses[0]?.modules.length ? Math.min(100, data.courses[0].modules.length * 22) : 0;
+
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden p-6 lg:p-8">
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr] lg:items-center">
           <div>
-            <Badge tone="teal">7 day learning streak</Badge>
-            <h1 className="mt-4 max-w-2xl text-3xl font-extrabold tracking-normal sm:text-4xl">Welcome back, Ari. Your web security path is ready.</h1>
+            <Badge tone="teal">{auth.user ? `${auth.user.level} level learner` : "Live platform connection"}</Badge>
+            <h1 className="mt-4 max-w-2xl text-3xl font-extrabold tracking-normal sm:text-4xl">
+              Welcome {auth.user?.displayName ?? auth.user?.username ?? "back"}. Your training workspace is online.
+            </h1>
             <p className="mt-3 max-w-2xl text-base leading-7 text-muted-foreground">
-              Continue the current module, launch an active machine, or submit your next flag from a focused workspace.
+              Continue the current path, inspect seeded labs, view rankings, or submit a flag through the backend API.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Button onClick={() => setView("path")}>
                 <Play className="h-4 w-4" />
                 Continue Learning
               </Button>
-              <Button variant="outline" onClick={() => setView("challenge")}>
+              <Button variant="outline" onClick={() => openChallenge()}>
                 <Flag className="h-4 w-4" />
                 Open Challenge
               </Button>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Metric label="XP earned" value="+1,240" />
-            <Metric label="Current rank" value="#42" />
-            <Metric label="Streak" value="7 days" />
-            <Metric label="Path progress" value="68%" />
+            <Metric label="XP earned" value={(auth.user?.xp ?? 0).toLocaleString()} />
+            <Metric label="Current rank" value={rankFor(auth.user, data.leaderboard)} />
+            <Metric label="Challenges" value={String(data.challenges.length)} />
+            <Metric label="Path progress" value={`${pathProgress}%`} />
           </div>
         </div>
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={Flag} label="Challenges Completed" value="126" delta="+8 this week" />
-        <StatCard icon={MonitorDot} label="Active Machines" value="2" delta="1 expiring soon" />
-        <StatCard icon={GraduationCap} label="Learning Progress" value="68%" delta="Web Security path" />
-        <StatCard icon={Star} label="Total XP" value="12,480" delta="Top 4%" />
+        <StatCard icon={Flag} label="Challenges Completed" value={String(solved)} delta={`${data.challenges.length} available`} />
+        <StatCard icon={MonitorDot} label="Active Machines" value={String(data.labs.length)} delta="Seeded lab inventory" />
+        <StatCard icon={GraduationCap} label="Learning Paths" value={String(data.courses.length)} delta={data.courses[0]?.title ?? "No published paths"} />
+        <StatCard icon={Star} label="Total XP" value={(auth.user?.xp ?? 0).toLocaleString()} delta={auth.user ? `Level ${auth.user.level}` : "Sign in to track"} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.35fr_0.9fr]">
-        <LearningProgress />
-        <RecentChallenges setView={setView} />
+        <LearningProgress courses={data.courses} setView={setView} />
+        <RecentChallenges challenges={data.challenges} openChallenge={openChallenge} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_0.85fr_0.85fr]">
-        <ActiveLabs />
-        <Leaderboard />
+        <ActiveLabs labs={data.labs} />
+        <Leaderboard leaders={data.leaderboard} />
         <ActivityFeed />
       </div>
     </div>
   );
+}
+
+function rankFor(user: User | null, leaders: User[]) {
+  if (!user) return "-";
+  const index = leaders.findIndex((leader) => leader.id === user.id);
+  return index >= 0 ? `#${index + 1}` : "-";
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -272,29 +415,29 @@ function StatCard({ icon: Icon, label, value, delta }: { icon: typeof Flag; labe
   );
 }
 
-function LearningProgress() {
+function LearningProgress({ courses, setView }: { courses: Course[]; setView: (view: View) => void }) {
   return (
     <section>
-      <SectionHeader title="Learning Progress" action={<Button variant="ghost" size="sm">View all</Button>} />
+      <SectionHeader title="Learning Progress" action={<Button variant="ghost" size="sm" onClick={() => setView("path")}>View all</Button>} />
       <div className="grid gap-4 md:grid-cols-2">
-        {progressAreas.map((area) => (
-          <Card key={area.name} className="p-5 hover:-translate-y-0.5 hover:shadow-soft">
+        {courses.map((course) => (
+          <Card key={course.slug} className="p-5 hover:-translate-y-0.5 hover:shadow-soft">
             <div className="mb-4 flex items-start justify-between">
               <div className="flex items-center gap-3">
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-accent/12 text-teal-700 dark:text-teal-200">
-                  <area.icon className="h-5 w-5" />
+                  <BookOpen className="h-5 w-5" />
                 </span>
                 <div>
-                  <h3 className="font-bold">{area.name}</h3>
-                  <p className="text-sm text-muted-foreground">{area.eta} remaining</p>
+                  <h3 className="font-bold">{course.title}</h3>
+                  <p className="text-sm text-muted-foreground">{course.summary}</p>
                 </div>
               </div>
-              <Badge tone={area.difficulty === "Hard" ? "red" : area.difficulty === "Intermediate" ? "amber" : "green"}>{area.difficulty}</Badge>
+              <Badge tone={difficultyTone(course.difficulty)}>{course.difficulty}</Badge>
             </div>
-            <Progress value={area.progress} />
+            <Progress value={Math.min(100, course.modules.length * 22)} />
             <div className="mt-4 flex items-center justify-between">
-              <span className="text-sm font-semibold text-muted-foreground">{area.progress}% complete</span>
-              <Button variant="soft" size="sm">Continue</Button>
+              <span className="text-sm font-semibold text-muted-foreground">{course.modules.length} modules</span>
+              <Button variant="soft" size="sm" onClick={() => setView("path")}>Continue</Button>
             </div>
           </Card>
         ))}
@@ -303,26 +446,23 @@ function LearningProgress() {
   );
 }
 
-function RecentChallenges({ setView }: { setView: (view: "dashboard" | "challenge" | "path") => void }) {
+function RecentChallenges({ challenges, openChallenge }: { challenges: Challenge[]; openChallenge: (slug?: string) => void }) {
   return (
     <section>
-      <SectionHeader title="Recent Challenges" action={<Button variant="ghost" size="sm">Browse</Button>} />
+      <SectionHeader title="Recent Challenges" action={<Button variant="ghost" size="sm" onClick={() => openChallenge()}>Browse</Button>} />
       <Card className="divide-y divide-border overflow-hidden">
         {challenges.map((challenge) => (
-          <div key={challenge.title} className="p-5 transition-colors hover:bg-muted/45">
+          <div key={challenge.slug} className="p-5 transition-colors hover:bg-muted/45">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="font-bold">{challenge.title}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">{challenge.category}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{challenge.category?.name ?? "Challenge"}</p>
               </div>
-              <Badge tone={challenge.difficulty === "Hard" ? "red" : challenge.difficulty === "Medium" ? "amber" : "green"}>{challenge.difficulty}</Badge>
+              <Badge tone={difficultyTone(challenge.difficulty)}>{challenge.difficulty}</Badge>
             </div>
             <div className="mt-4 flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-primary">{challenge.xp} XP</span>
-              <div className="flex items-center gap-2">
-                <span className="hidden text-sm text-muted-foreground sm:inline">{challenge.status}</span>
-                <Button size="sm" onClick={() => setView("challenge")}>Solve</Button>
-              </div>
+              <span className="text-sm font-semibold text-primary">{challenge.baseXp} XP</span>
+              <Button size="sm" onClick={() => openChallenge(challenge.slug)}>Solve</Button>
             </div>
           </div>
         ))}
@@ -331,23 +471,27 @@ function RecentChallenges({ setView }: { setView: (view: "dashboard" | "challeng
   );
 }
 
-function ActiveLabs() {
+function ActiveLabs({ labs }: { labs: Lab[] }) {
+  const [connectedLab, setConnectedLab] = useState("");
+
   return (
     <section>
       <SectionHeader title="Active Labs" />
       <div className="space-y-4">
         {labs.map((lab) => (
-          <Card key={lab.name} className="p-5">
+          <Card key={lab.slug} className="p-5">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="font-bold">{lab.name}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">{lab.os} · {lab.ip}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{lab.os} | {lab.timeLimitMinutes} minutes</p>
               </div>
-              <Badge tone={lab.status === "Running" ? "green" : "slate"}>{lab.status}</Badge>
+              <Badge tone={connectedLab === lab.slug ? "teal" : "green"}>{connectedLab === lab.slug ? "Connected" : "Available"}</Badge>
             </div>
             <div className="mt-4 flex items-center justify-between">
-              <Badge tone={lab.difficulty === "Hard" ? "red" : "amber"}>{lab.difficulty}</Badge>
-              <Button variant="outline" size="sm">Connect</Button>
+              <Badge tone={difficultyTone(lab.difficulty)}>{lab.difficulty}</Badge>
+              <Button variant="outline" size="sm" onClick={() => setConnectedLab(connectedLab === lab.slug ? "" : lab.slug)}>
+                {connectedLab === lab.slug ? "Disconnect" : "Connect"}
+              </Button>
             </div>
           </Card>
         ))}
@@ -356,20 +500,20 @@ function ActiveLabs() {
   );
 }
 
-function Leaderboard() {
+function Leaderboard({ leaders }: { leaders: User[] }) {
   return (
     <section>
       <SectionHeader title="Leaderboard" />
       <Card className="divide-y divide-border overflow-hidden">
-        {leaders.map(([rank, name, xp, country]) => (
-          <div key={name} className="flex items-center gap-3 p-4">
-            <span className="w-6 text-sm font-bold text-primary">#{rank}</span>
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-muted text-sm font-bold">{name.slice(0, 2).toUpperCase()}</span>
+        {leaders.map((leader, index) => (
+          <div key={leader.id} className="flex items-center gap-3 p-4">
+            <span className="w-6 text-sm font-bold text-primary">#{index + 1}</span>
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-muted text-sm font-bold">{leader.username.slice(0, 2).toUpperCase()}</span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold">{name}</p>
-              <p className="text-xs text-muted-foreground">{country}</p>
+              <p className="truncate text-sm font-bold">{leader.displayName ?? leader.username}</p>
+              <p className="text-xs text-muted-foreground">Level {leader.level}</p>
             </div>
-            <span className="text-sm font-semibold">{xp}</span>
+            <span className="text-sm font-semibold">{leader.xp.toLocaleString()} XP</span>
           </div>
         ))}
       </Card>
@@ -400,25 +544,48 @@ function ActivityFeed() {
   );
 }
 
-function ChallengeDetail() {
+function ChallengeDetail({ auth, setAuth, challenge }: { auth: AuthState; setAuth: (auth: AuthState) => void; challenge?: Challenge }) {
+  const [flag, setFlag] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submitFlag() {
+    if (!challenge || !auth.accessToken) return;
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const payload = await api<{ correct: boolean; awardedXp: number }>(`/challenges/${challenge.slug}/submissions`, {
+        method: "POST",
+        token: auth.accessToken,
+        body: JSON.stringify({ flag }),
+      });
+      setMessage(payload.data.correct ? `Correct flag. Awarded ${payload.data.awardedXp} XP.` : "Incorrect flag. Try again.");
+      if (payload.data.correct && auth.user) setAuth({ ...auth, user: { ...auth.user, xp: auth.user.xp + payload.data.awardedXp } });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Flag submission failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!challenge) return <StatusPanel tone="info" message="No challenge is published yet." />;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        Dashboard / Challenges / <span className="font-semibold text-foreground">Header Mirage</span>
+        Dashboard / Challenges / <span className="font-semibold text-foreground">{challenge.title}</span>
       </div>
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
         <Card className="p-6 lg:p-8">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <Badge tone="indigo">Web Security</Badge>
-              <h1 className="mt-4 text-3xl font-extrabold">Header Mirage</h1>
-              <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">
-                Inspect a misconfigured gateway, trace its forwarding behavior, and recover the hidden training flag from trusted request metadata.
-              </p>
+              <Badge tone="indigo">{challenge.category?.name ?? "Challenge"}</Badge>
+              <h1 className="mt-4 text-3xl font-extrabold">{challenge.title}</h1>
+              <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">{challenge.description}</p>
             </div>
             <div className="flex gap-2">
-              <Badge tone="green">Easy</Badge>
-              <Badge tone="teal">180 XP</Badge>
+              <Badge tone={difficultyTone(challenge.difficulty)}>{challenge.difficulty}</Badge>
+              <Badge tone="teal">{challenge.baseXp} XP</Badge>
             </div>
           </div>
           <div className="mt-8 grid gap-5 md:grid-cols-2">
@@ -441,30 +608,23 @@ X-TrainHack-Trace: enabled`}</code></pre>
           </div>
         </Card>
         <aside className="space-y-5">
+          <AuthCard auth={auth} setAuth={setAuth} />
           <Card className="p-5">
             <h2 className="font-bold">Submit Flag</h2>
-            <Input className="mt-4" placeholder="TH{...}" aria-label="Flag submission" />
-            <Button className="mt-3 w-full">Submit Answer</Button>
+            <Input className="mt-4" value={flag} onChange={(event) => setFlag(event.target.value)} placeholder="TH{...}" aria-label="Flag submission" />
+            <Button className="mt-3 w-full" disabled={!auth.accessToken || !flag || submitting} onClick={submitFlag}>
+              Submit Answer
+            </Button>
+            {message && <p className="mt-3 text-sm font-semibold text-muted-foreground">{message}</p>}
           </Card>
           <Card className="p-5">
             <h2 className="font-bold">Helpful Hints</h2>
-            {["Review proxy headers", "Compare local and remote responses", "Check gateway trust boundaries"].map((hint) => (
-              <details key={hint} className="group mt-3 rounded-xl border border-border p-3">
-                <summary className="cursor-pointer text-sm font-semibold">{hint}</summary>
-                <p className="mt-2 text-sm text-muted-foreground">Use the lab terminal and inspect how the service interprets client identity.</p>
+            {(challenge.hints?.length ? challenge.hints : [{ id: "proxy", title: "Review proxy headers", penaltyPct: 0 }]).map((hint) => (
+              <details key={hint.id} className="group mt-3 rounded-xl border border-border p-3">
+                <summary className="cursor-pointer text-sm font-semibold">{hint.title}</summary>
+                <p className="mt-2 text-sm text-muted-foreground">{hint.content ?? "Use the lab terminal and inspect how the service interprets client identity."}</p>
               </details>
             ))}
-          </Card>
-          <Card className="p-5">
-            <h2 className="font-bold">Related Resources</h2>
-            <div className="mt-4 space-y-3">
-              {["HTTP proxy basics", "Access control checklist", "Secure header handling"].map((resource) => (
-                <button key={resource} className="flex w-full items-center gap-3 rounded-xl p-2 text-left text-sm font-semibold hover:bg-muted">
-                  <BookOpen className="h-4 w-4 text-primary" />
-                  {resource}
-                </button>
-              ))}
-            </div>
           </Card>
         </aside>
       </div>
@@ -472,46 +632,105 @@ X-TrainHack-Trace: enabled`}</code></pre>
   );
 }
 
-function LearningPath() {
+function AuthCard({ auth, setAuth }: { auth: AuthState; setAuth: (auth: AuthState) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [email, setEmail] = useState(demoCredentials.email);
+  const [username, setUsername] = useState("newlearner");
+  const [password, setPassword] = useState(demoCredentials.password);
+  const [message, setMessage] = useState("");
+
+  async function submit() {
+    setMessage("");
+    try {
+      if (mode === "register") {
+        await api<User>("/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ email, username, password, displayName: username }),
+        });
+      }
+      const payload = await api<AuthState>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password, deviceName: "TrainHack UI" }),
+      });
+      setAuth(payload.data);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Authentication failed.");
+    }
+  }
+
+  if (auth.user) {
+    return (
+      <Card className="p-5">
+        <h2 className="font-bold">{auth.user.displayName ?? auth.user.username}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{auth.user.email}</p>
+        <Button className="mt-4 w-full" variant="outline" onClick={() => setAuth({ user: null, accessToken: "", refreshToken: "" })}>
+          Logout
+        </Button>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-5">
+      <div className="flex gap-2">
+        <Button size="sm" variant={mode === "login" ? "primary" : "outline"} onClick={() => setMode("login")}>Login</Button>
+        <Button size="sm" variant={mode === "register" ? "primary" : "outline"} onClick={() => setMode("register")}>Register</Button>
+      </div>
+      <Input className="mt-4" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" aria-label="Email" />
+      {mode === "register" && <Input className="mt-3" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" aria-label="Username" />}
+      <Input className="mt-3" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" aria-label="Password" />
+      <Button className="mt-3 w-full" onClick={submit}>{mode === "login" ? "Login" : "Create Account"}</Button>
+      {message && <p className="mt-3 flex gap-2 text-sm font-semibold text-red-600"><XCircle className="h-4 w-4" />{message}</p>}
+    </Card>
+  );
+}
+
+function LearningPath({ course }: { course?: Course }) {
+  const [openModule, setOpenModule] = useState("");
+
+  if (!course) return <StatusPanel tone="info" message="No learning path is published yet." />;
+  const totalMinutes = course.modules.flatMap((module) => module.lessons).reduce((total, lesson) => total + lesson.estimatedMinutes, 0);
+
   return (
     <div className="space-y-6">
       <Card className="p-6 lg:p-8">
         <Badge tone="teal">Interactive roadmap</Badge>
-        <h1 className="mt-4 text-3xl font-extrabold">Web Security Foundations</h1>
-        <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">
-          A connected progression of lessons, labs, and practical CTF checkpoints designed for confident, repeatable growth.
-        </p>
+        <h1 className="mt-4 text-3xl font-extrabold">{course.title}</h1>
+        <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">{course.summary}</p>
         <div className="mt-6 max-w-2xl">
-          <Progress value={58} />
+          <Progress value={Math.min(100, course.modules.length * 22)} />
           <div className="mt-3 flex justify-between text-sm font-semibold text-muted-foreground">
-            <span>58% complete</span>
-            <span>6h 20m remaining</span>
+            <span>{course.modules.length} modules</span>
+            <span>{Math.round(totalMinutes / 60)}h remaining</span>
           </div>
         </div>
       </Card>
       <div className="grid gap-4">
-        {modules.map((module, index) => (
-          <Card key={module.title} className={cn("p-5", module.state === "current" && "border-primary shadow-lift")}>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-4">
-                <span className={cn("grid h-12 w-12 place-items-center rounded-2xl", module.state === "complete" && "bg-green-500/10 text-green-600", module.state === "current" && "bg-primary/10 text-primary", module.state === "locked" && "bg-muted text-muted-foreground")}>
-                  {module.state === "complete" ? <CheckCircle2 className="h-6 w-6" /> : module.state === "current" ? <Play className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
-                </span>
-                <div>
-                  <p className="text-sm font-semibold text-muted-foreground">Module {index + 1}</p>
-                  <h2 className="text-lg font-bold">{module.title}</h2>
+        {course.modules.map((module, index) => {
+          const state = index === 0 ? "complete" : index === 1 ? "current" : "locked";
+          return (
+            <Card key={module.id} className={cn("p-5", state === "current" && "border-primary shadow-lift")}>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                  <span className={cn("grid h-12 w-12 place-items-center rounded-2xl", state === "complete" && "bg-green-500/10 text-green-600", state === "current" && "bg-primary/10 text-primary", state === "locked" && "bg-muted text-muted-foreground")}>
+                    {state === "complete" ? <CheckCircle2 className="h-6 w-6" /> : state === "current" ? <Play className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold text-muted-foreground">Module {index + 1}</p>
+                    <h2 className="text-lg font-bold">{module.title}</h2>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge tone={state === "locked" ? "slate" : state === "current" ? "indigo" : "green"}>{state}</Badge>
+                  <span className="text-sm font-semibold text-muted-foreground">{module.lessons[0]?.estimatedMinutes ?? 30}m</span>
+                  <Button size="sm" variant={state === "locked" ? "outline" : openModule === module.id ? "soft" : "primary"} disabled={state === "locked"} onClick={() => setOpenModule(module.id)}>
+                    {state === "locked" ? "Locked" : openModule === module.id ? "Opened" : "Open"}
+                  </Button>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <Badge tone={module.state === "locked" ? "slate" : module.state === "current" ? "indigo" : "green"}>{module.state}</Badge>
-                <span className="text-sm font-semibold text-muted-foreground">{module.time}</span>
-                <Button size="sm" variant={module.state === "locked" ? "outline" : "primary"} disabled={module.state === "locked"}>
-                  {module.state === "locked" ? "Locked" : "Open"}
-                </Button>
-              </div>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

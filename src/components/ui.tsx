@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 import { cn } from "../lib/utils";
 
@@ -71,9 +72,10 @@ export function Progress({ value, className }: { value: number; className?: stri
   );
 }
 
-export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...props }, ref) {
   return (
     <input
+      ref={ref}
       className={cn(
         "h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-foreground placeholder:text-muted-foreground",
         "transition-colors focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10",
@@ -82,7 +84,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
       {...props}
     />
   );
-}
+});
 
 export function SectionHeader({ title, action }: { title: string; action?: ReactNode }) {
   return (
