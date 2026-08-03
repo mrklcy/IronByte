@@ -1,4 +1,4 @@
-import { ContentStatus, Prisma, SubmissionStatus } from "@prisma/client";
+import { ContentStatus, LabStatus, Prisma, SubmissionStatus } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 
 export class ContentRepository {
@@ -89,6 +89,112 @@ export class ContentRepository {
       orderBy: { createdAt: "desc" },
       take: 50,
       include: { notification: true },
+    });
+  }
+
+  async markNotificationRead(id: string, userId: string) {
+    await prisma.userNotification.updateMany({
+      where: { id, userId },
+      data: { readAt: new Date() },
+    });
+    return prisma.userNotification.findFirst({
+      where: { id, userId },
+      include: { notification: true },
+    });
+  }
+
+  activeLabAttempts(userId: string) {
+    return prisma.labAttempt.findMany({
+      where: { userId, status: LabStatus.RUNNING },
+      orderBy: { createdAt: "desc" },
+      include: { lab: { include: { category: true } } },
+    });
+  }
+
+  async startLab(slug: string, userId: string) {
+    const lab = await prisma.lab.findUnique({ where: { slug } });
+    if (!lab || lab.status !== ContentStatus.PUBLISHED) return null;
+
+    await prisma.labAttempt.updateMany({
+      where: { userId, labId: lab.id, status: LabStatus.RUNNING },
+      data: { status: LabStatus.STOPPED, stoppedAt: new Date() },
+    });
+
+    return prisma.labAttempt.create({
+      data: {
+        userId,
+        labId: lab.id,
+        status: LabStatus.RUNNING,
+        startedAt: new Date(),
+        expiresAt: new Date(Date.now() + lab.timeLimitMinutes * 60 * 1000),
+      },
+      include: { lab: { include: { category: true } } },
+    });
+  }
+
+  async stopLabAttempt(id: string, userId: string) {
+    await prisma.labAttempt.updateMany({
+      where: { id, userId },
+      data: { status: LabStatus.STOPPED, stoppedAt: new Date() },
+    });
+    return prisma.labAttempt.findFirst({
+      where: { id, userId },
+      include: { lab: { include: { category: true } } },
+    });
+  }
+
+  certificates(userId: string) {
+    return prisma.certificate.findMany({
+      where: { userId },
+      orderBy: { issuedAt: "desc" },
+    });
+  }
+
+  issueCertificate(userId: string, title: string) {
+    return prisma.certificate.upsert({
+      where: { serial: `${userId}:${title}` },
+      update: {},
+      create: {
+        userId,
+        title,
+        serial: `${userId}:${title}`,
+      },
+    });
+  }
+
+  communityPosts(limit = 25) {
+    return prisma.activityLog.findMany({
+      where: { action: "community.post" },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: { user: { select: { id: true, username: true, displayName: true, level: true, xp: true } } },
+    });
+  }
+
+  createCommunityPost(userId: string, message: string) {
+    return prisma.activityLog.create({
+      data: {
+        userId,
+        action: "community.post",
+        metadata: { message },
+      },
+      include: { user: { select: { id: true, username: true, displayName: true, level: true, xp: true } } },
+    });
+  }
+
+  userSettings(userId: string) {
+    return prisma.userSettings.upsert({
+      where: { userId },
+      update: {},
+      create: { userId },
+    });
+  }
+
+  updateUserSettings(userId: string, data: { theme?: string; emailNotifications?: boolean; profileVisibility?: string }) {
+    return prisma.userSettings.upsert({
+      where: { userId },
+      update: data,
+      create: { userId, ...data },
     });
   }
 }

@@ -19,8 +19,8 @@ export function Button({
         size === "sm" && "h-9 px-3 text-sm",
         size === "md" && "h-11 px-4 text-sm",
         size === "icon" && "h-10 w-10",
-        variant === "primary" && "bg-primary text-primary-foreground shadow-lift hover:-translate-y-0.5 hover:bg-[#4338CA]",
-        variant === "secondary" && "bg-accent text-accent-foreground hover:bg-[#0F9F92]",
+        variant === "primary" && "bg-primary text-primary-foreground shadow-lift hover:-translate-y-0.5 hover:bg-[#0476D9]",
+        variant === "secondary" && "bg-accent text-accent-foreground hover:bg-[#128FE0]",
         variant === "outline" && "border border-border bg-surface text-foreground hover:bg-muted",
         variant === "ghost" && "text-muted-foreground hover:bg-muted hover:text-foreground",
         variant === "soft" && "bg-primary/10 text-primary hover:bg-primary/15",
@@ -88,8 +88,8 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
 
 export function SectionHeader({ title, action }: { title: string; action?: ReactNode }) {
   return (
-    <div className="mb-4 flex items-center justify-between gap-4">
-      <h2 className="text-lg font-bold tracking-normal text-foreground">{title}</h2>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h2 className="min-w-0 break-words text-lg font-bold tracking-normal text-foreground">{title}</h2>
       {action}
     </div>
   );

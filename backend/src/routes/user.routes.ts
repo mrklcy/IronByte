@@ -8,4 +8,5 @@ const controller = new UserController();
 export const userRouter = Router();
 
 userRouter.get("/me", authenticate, controller.me);
+userRouter.get("/me/analytics", authenticate, controller.analytics);
 userRouter.get("/", authenticate, requirePermission(permissions.usersRead), controller.list);

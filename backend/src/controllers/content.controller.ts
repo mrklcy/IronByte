@@ -38,6 +38,36 @@ export class ContentController {
 
   notifications = async (req: Request, res: Response) =>
     ok(res, "Notifications loaded.", await this.content.notifications(req.user!.id));
+
+  markNotificationRead = async (req: Request, res: Response) =>
+    ok(res, "Notification marked as read.", await this.content.markNotificationRead(pathParam(req.params.id), req.user!.id));
+
+  activeLabAttempts = async (req: Request, res: Response) =>
+    ok(res, "Active lab attempts loaded.", await this.content.activeLabAttempts(req.user!.id));
+
+  startLab = async (req: Request, res: Response) =>
+    ok(res, "Lab started.", await this.content.startLab(pathParam(req.params.slug), req.user!.id), undefined, 201);
+
+  stopLabAttempt = async (req: Request, res: Response) =>
+    ok(res, "Lab stopped.", await this.content.stopLabAttempt(pathParam(req.params.id), req.user!.id));
+
+  certificates = async (req: Request, res: Response) =>
+    ok(res, "Certificates loaded.", await this.content.certificates(req.user!.id));
+
+  issueCertificate = async (req: Request, res: Response) =>
+    ok(res, "Certificate issued.", await this.content.issueCertificate(req.user!.id, "Web Security Foundations"), undefined, 201);
+
+  communityPosts = async (_req: Request, res: Response) =>
+    ok(res, "Community posts loaded.", await this.content.communityPosts());
+
+  createCommunityPost = async (req: Request, res: Response) =>
+    ok(res, "Community post created.", await this.content.createCommunityPost(req.user!.id, req.body.message), undefined, 201);
+
+  settings = async (req: Request, res: Response) =>
+    ok(res, "Settings loaded.", await this.content.settings(req.user!.id));
+
+  updateSettings = async (req: Request, res: Response) =>
+    ok(res, "Settings updated.", await this.content.updateSettings(req.user!.id, req.body));
 }
 
 function queryString(value: unknown) {

@@ -11,6 +11,16 @@ redis.on("error", (error: Error) => logger.error({ error }, "Redis error"));
 
 export async function connectRedis() {
   if (redis.status === "wait") {
-    await redis.connect();
+    try {
+      await redis.connect();
+    } catch (error) {
+      if (env.NODE_ENV === "development") {
+        logger.warn({ error }, "Redis unavailable; continuing without Redis in development");
+        redis.disconnect();
+        return;
+      }
+
+      throw error;
+    }
   }
 }

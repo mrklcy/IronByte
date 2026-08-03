@@ -16,16 +16,16 @@ export default {
         "muted-foreground": "hsl(var(--muted-foreground))",
         surface: "hsl(var(--surface))",
         primary: {
-          DEFAULT: "#4F46E5",
+          DEFAULT: "#078BFF",
           foreground: "#FFFFFF",
         },
         secondary: {
-          DEFAULT: "#6366F1",
+          DEFAULT: "#0757C8",
           foreground: "#FFFFFF",
         },
         accent: {
-          DEFAULT: "#14B8A6",
-          foreground: "#042F2E",
+          DEFAULT: "#2EA8FF",
+          foreground: "#03162D",
         },
       },
       borderRadius: {
@@ -33,8 +33,8 @@ export default {
         "2xl": "1rem",
       },
       boxShadow: {
-        soft: "0 16px 40px rgba(15, 23, 42, 0.08)",
-        lift: "0 10px 24px rgba(79, 70, 229, 0.14)",
+        soft: "0 16px 40px rgba(3, 22, 45, 0.10)",
+        lift: "0 10px 26px rgba(7, 139, 255, 0.22)",
       },
     },
   },

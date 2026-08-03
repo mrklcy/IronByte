@@ -63,4 +63,50 @@ export class ContentService {
   notifications(userId: string) {
     return this.content.notifications(userId);
   }
+
+  async markNotificationRead(id: string, userId: string) {
+    const notification = await this.content.markNotificationRead(id, userId);
+    if (!notification) throw new AppError("Notification not found.", 404, "NOTIFICATION_NOT_FOUND");
+    return notification;
+  }
+
+  activeLabAttempts(userId: string) {
+    return this.content.activeLabAttempts(userId);
+  }
+
+  async startLab(slug: string, userId: string) {
+    const attempt = await this.content.startLab(slug, userId);
+    if (!attempt) throw new AppError("Lab not found.", 404, "LAB_NOT_FOUND");
+    return attempt;
+  }
+
+  async stopLabAttempt(id: string, userId: string) {
+    const attempt = await this.content.stopLabAttempt(id, userId);
+    if (!attempt) throw new AppError("Lab attempt not found.", 404, "LAB_ATTEMPT_NOT_FOUND");
+    return attempt;
+  }
+
+  certificates(userId: string) {
+    return this.content.certificates(userId);
+  }
+
+  async issueCertificate(userId: string, title: string) {
+    return this.content.issueCertificate(userId, title);
+  }
+
+  communityPosts() {
+    return this.content.communityPosts();
+  }
+
+  createCommunityPost(userId: string, message: string) {
+    return this.content.createCommunityPost(userId, message);
+  }
+
+  settings(userId: string) {
+    return this.content.userSettings(userId);
+  }
+
+  updateSettings(userId: string, input: { theme?: string; emailNotifications?: boolean; profileVisibility?: string }) {
+    return this.content.updateUserSettings(userId, input);
+  }
 }

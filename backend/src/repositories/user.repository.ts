@@ -71,6 +71,19 @@ export class UserRepository {
     ]);
   }
 
+  solvedAnalytics(userId: string) {
+    return prisma.flagSubmission.findMany({
+      where: { userId, status: "CORRECT" },
+      orderBy: { createdAt: "desc" },
+      distinct: ["challengeId"],
+      include: {
+        challenge: {
+          include: { category: true },
+        },
+      },
+    });
+  }
+
   roleNames(user: Awaited<ReturnType<UserRepository["findById"]>>): RoleName[] {
     return user?.roles.map((userRole) => userRole.role.name) ?? [];
   }

@@ -5,21 +5,21 @@
 @tailwind utilities;
 
 :root {
-  --background: 210 40% 98%;
-  --foreground: 222 47% 11%;
+  --background: 212 44% 98%;
+  --foreground: 218 70% 10%;
   --surface: 0 0% 100%;
-  --muted: 220 14% 96%;
-  --muted-foreground: 215 16% 47%;
-  --border: 214 32% 91%;
+  --muted: 211 48% 95%;
+  --muted-foreground: 215 28% 39%;
+  --border: 211 42% 88%;
 }
 
 .dark {
-  --background: 222 47% 7%;
-  --foreground: 210 40% 98%;
-  --surface: 222 40% 11%;
-  --muted: 222 31% 15%;
-  --muted-foreground: 215 20% 70%;
-  --border: 217 24% 22%;
+  --background: 219 85% 4%;
+  --foreground: 210 45% 96%;
+  --surface: 217 70% 8%;
+  --muted: 216 58% 13%;
+  --muted-foreground: 211 32% 72%;
+  --border: 214 54% 20%;
 }
 
 * {
@@ -30,11 +30,24 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: Inter, Geist, ui-sans-serif, system-ui, sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+p,
+h1,
+h2,
+h3 {
+  overflow-wrap: anywhere;
 }
 
 button,
@@ -50,5 +63,30 @@ input:focus-visible {
 }
 
 ::selection {
-  background: rgba(20, 184, 166, 0.22);
+  background: rgba(7, 139, 255, 0.24);
+}
+
+.auth-grid {
+  background-image:
+    linear-gradient(rgba(7, 139, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 184, 166, 0.08) 1px, transparent 1px);
+  background-size: 34px 34px;
+  animation: auth-grid-drift 18s linear infinite;
+  mask-image: linear-gradient(135deg, black 0%, transparent 72%);
+}
+
+.radar-sweep {
+  background:
+    conic-gradient(from 0deg, rgba(20, 184, 166, 0.52), rgba(7, 139, 255, 0.18) 18deg, transparent 58deg, transparent 360deg);
+  mask-image: radial-gradient(circle, black 0 66%, transparent 67%);
+}
+
+@keyframes auth-grid-drift {
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 68px 34px;
+  }
 }
