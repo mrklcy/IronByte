@@ -51,6 +51,9 @@ export class ContentController {
   stopLabAttempt = async (req: Request, res: Response) =>
     ok(res, "Lab stopped.", await this.content.stopLabAttempt(pathParam(req.params.id), req.user!.id));
 
+  submitLabFlag = async (req: Request, res: Response) =>
+    ok(res, "Lab flag submission processed.", await this.content.submitLabFlag(pathParam(req.params.slug), req.user!.id, req.body.flag));
+
   certificates = async (req: Request, res: Response) =>
     ok(res, "Certificates loaded.", await this.content.certificates(req.user!.id));
 

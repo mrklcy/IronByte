@@ -20,6 +20,13 @@ contentRouter.post(
   validate(slugParamSchema),
   controller.startLab,
 );
+contentRouter.post(
+  "/labs/:slug/flag",
+  authenticate,
+  requirePermission(permissions.labsUse),
+  validate(submitFlagSchema),
+  controller.submitLabFlag,
+);
 contentRouter.post("/lab-attempts/:id/stop", authenticate, validate(idParamSchema), controller.stopLabAttempt);
 contentRouter.get("/challenges", validate(listContentSchema), controller.listChallenges);
 contentRouter.get("/challenges/:slug", validate(slugParamSchema), controller.getChallenge);

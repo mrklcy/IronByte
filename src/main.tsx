@@ -105,12 +105,34 @@ type Lab = {
   category?: { name: string };
 };
 
+type LabTarget = {
+  address: string;
+  url: string;
+  username: string;
+  password: string;
+  objective: string;
+  flagFormat: string;
+  rewardXp: number;
+  commands: string[];
+  clues: string[];
+};
+
 type LabAttempt = {
   id: string;
   status: "STOPPED" | "RUNNING" | "PAUSED" | "EXPIRED";
   startedAt?: string | null;
   expiresAt?: string | null;
+  ipAddress?: string | null;
+  target?: LabTarget;
   lab: Lab;
+};
+
+type LabFlagResult = {
+  correct: boolean;
+  awardedXp: number;
+  completed: boolean;
+  alreadyCompleted?: boolean;
+  expectedFormat?: string;
 };
 
 type Certificate = {
@@ -320,6 +342,7 @@ function useLabSessions(auth: AuthState) {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [actionSlug, setActionSlug] = useState("");
+  const [flagSlug, setFlagSlug] = useState("");
 
   async function loadAttempts() {
     if (!auth.accessToken) {
@@ -368,11 +391,41 @@ function useLabSessions(auth: AuthState) {
     }
   }
 
+  async function submitLabFlag(lab: Lab, flag: string) {
+    if (!auth.accessToken) {
+      setMessage("Log in to submit lab flags.");
+      return null;
+    }
+
+    setFlagSlug(lab.slug);
+    try {
+      const payload = await api<LabFlagResult>(`/labs/${lab.slug}/flag`, {
+        method: "POST",
+        token: auth.accessToken,
+        body: JSON.stringify({ flag }),
+      });
+      setMessage(
+        payload.data.correct
+          ? payload.data.awardedXp
+            ? `Correct lab flag. Awarded ${payload.data.awardedXp} XP.`
+            : "Correct lab flag. This lab was already completed."
+          : `Incorrect lab flag. Expected format: ${payload.data.expectedFormat ?? "TH{...}"}.`,
+      );
+      if (payload.data.correct) await loadAttempts();
+      return payload.data;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Lab flag submission failed.");
+      return null;
+    } finally {
+      setFlagSlug("");
+    }
+  }
+
   function runningFor(slug: string) {
     return attempts.find((attempt) => attempt.lab.slug === slug && isLiveAttempt(attempt));
   }
 
-  return { attempts, message, loading, actionSlug, loadAttempts, toggleLab, runningFor };
+  return { attempts, message, loading, actionSlug, flagSlug, loadAttempts, toggleLab, submitLabFlag, runningFor };
 }
 
 function App() {
@@ -1933,7 +1986,7 @@ function RecentChallenges({ challenges, openChallenge }: { challenges: Challenge
 }
 
 function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
-  const { message, loading, actionSlug, loadAttempts, toggleLab, runningFor } = useLabSessions(auth);
+  const { message, loading, actionSlug, flagSlug, loadAttempts, toggleLab, submitLabFlag, runningFor } = useLabSessions(auth);
 
   return (
     <section>
@@ -1963,6 +2016,7 @@ function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
                 <Badge className="shrink-0" tone={running ? "teal" : "green"}>{running ? "Running" : "Available"}</Badge>
               </div>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">{lab.description}</p>
+              {running && <LabSessionPanel lab={lab} attempt={running} flagBusy={flagSlug === lab.slug} onSubmitFlag={submitLabFlag} />}
               <div className="mt-4 flex items-center justify-between gap-3">
                 <Badge tone={difficultyTone(lab.difficulty)}>{lab.difficulty}</Badge>
                 <Button variant={running ? "outline" : "primary"} size="sm" onClick={() => toggleLab(lab)} disabled={actionSlug === lab.slug}>
@@ -1974,6 +2028,86 @@ function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
         })}
       </div>
     </section>
+  );
+}
+
+function LabSessionPanel({
+  lab,
+  attempt,
+  flagBusy,
+  onSubmitFlag,
+}: {
+  lab: Lab;
+  attempt: LabAttempt;
+  flagBusy: boolean;
+  onSubmitFlag: (lab: Lab, flag: string) => Promise<LabFlagResult | null>;
+}) {
+  const [flag, setFlag] = useState("");
+  const [result, setResult] = useState<LabFlagResult | null>(null);
+  const target = attempt.target;
+
+  async function submit() {
+    const payload = await onSubmitFlag(lab, flag);
+    setResult(payload);
+    if (payload?.correct) setFlag("");
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-extrabold text-primary">Target online</p>
+          <p className="mt-1 text-xs font-semibold text-muted-foreground">Started {shortDateTime(attempt.startedAt)} | {timeLeftLabel(attempt.expiresAt)}</p>
+        </div>
+        <Badge tone="teal">{target?.rewardXp ?? 180} XP</Badge>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase text-muted-foreground">
+            <ServerCog className="h-4 w-4" />
+            Connection
+          </div>
+          <p className="break-all text-sm font-bold">{target?.url ?? `http://${attempt.ipAddress ?? "target.local"}`}</p>
+          <p className="mt-1 text-xs text-muted-foreground">IP: {attempt.ipAddress ?? target?.address ?? "-"}</p>
+        </div>
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase text-muted-foreground">
+            <KeyRound className="h-4 w-4" />
+            Credentials
+          </div>
+          <p className="text-sm font-bold">{target?.username ?? "learner"}</p>
+          <p className="mt-1 break-all text-xs text-muted-foreground">{target?.password ?? `trainhack-${lab.slug}`}</p>
+        </div>
+      </div>
+
+      <p className="mt-4 text-sm leading-6 text-muted-foreground">{target?.objective ?? "Enumerate the machine and submit the proof flag."}</p>
+      <div className="mt-4 rounded-xl bg-slate-950 p-4 text-slate-100">
+        <div className="mb-3 flex items-center gap-2 text-xs font-bold text-slate-400">
+          <Terminal className="h-4 w-4" />
+          Suggested checks
+        </div>
+        <pre className="overflow-x-auto text-xs leading-6"><code>{(target?.commands ?? [`nmap -sV ${attempt.ipAddress ?? "target"}`]).join("\n")}</code></pre>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {(target?.clues ?? []).map((clue) => (
+          <p key={clue} className="rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-muted-foreground">{clue}</p>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+        <Input value={flag} onChange={(event) => setFlag(event.target.value)} placeholder={target?.flagFormat ?? "TH{...}"} aria-label={`${lab.name} lab flag`} />
+        <Button onClick={submit} disabled={!flag || flagBusy} className="sm:w-40">
+          {flagBusy ? "Checking" : "Submit Flag"}
+        </Button>
+      </div>
+      {result && (
+        <p className={cn("mt-3 text-sm font-bold", result.correct ? "text-green-700 dark:text-green-300" : "text-red-700 dark:text-red-300")}>
+          {result.correct ? (result.awardedXp ? `Completed. +${result.awardedXp} XP` : "Completed already.") : "Incorrect flag. Keep going."}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -2038,7 +2172,7 @@ function ActivityFeed() {
 }
 
 function Machines({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
-  const { message, loading, actionSlug, loadAttempts, toggleLab, runningFor } = useLabSessions(auth);
+  const { message, loading, actionSlug, flagSlug, loadAttempts, toggleLab, submitLabFlag, runningFor } = useLabSessions(auth);
   const runningCount = labs.filter((lab) => runningFor(lab.slug)).length;
   const availableCount = Math.max(0, labs.length - runningCount);
 
@@ -2104,10 +2238,7 @@ function Machines({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
                 </div>
               </div>
               {running && (
-                <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3">
-                  <p className="text-sm font-bold text-primary">{timeLeftLabel(running.expiresAt)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Started {shortDateTime(running.startedAt)} | expires {shortDateTime(running.expiresAt)}</p>
-                </div>
+                <LabSessionPanel lab={lab} attempt={running} flagBusy={flagSlug === lab.slug} onSubmitFlag={submitLabFlag} />
               )}
               <Button className="mt-4 w-full" variant={running ? "outline" : "primary"} onClick={() => toggleLab(lab)} disabled={actionSlug === lab.slug}>
                 {actionSlug === lab.slug ? "Working" : running ? "Stop Machine" : "Start Machine"}

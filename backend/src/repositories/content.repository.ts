@@ -116,7 +116,22 @@ export class ContentRepository {
     });
   }
 
-  async startLab(slug: string, userId: string) {
+  getLab(slug: string) {
+    return prisma.lab.findUnique({
+      where: { slug },
+      include: { category: true },
+    });
+  }
+
+  activeAttemptForLab(userId: string, labId: string) {
+    return prisma.labAttempt.findFirst({
+      where: { userId, labId, status: LabStatus.RUNNING, expiresAt: { gt: new Date() } },
+      include: { lab: { include: { category: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async startLab(slug: string, userId: string, ipAddress: string) {
     const lab = await prisma.lab.findUnique({ where: { slug } });
     if (!lab || lab.status !== ContentStatus.PUBLISHED) return null;
     const now = new Date();
@@ -131,6 +146,7 @@ export class ContentRepository {
         userId,
         labId: lab.id,
         status: LabStatus.RUNNING,
+        ipAddress,
         startedAt: now,
         expiresAt: new Date(now.getTime() + lab.timeLimitMinutes * 60 * 1000),
       },
@@ -146,6 +162,41 @@ export class ContentRepository {
     return prisma.labAttempt.findFirst({
       where: { id, userId },
       include: { lab: { include: { category: true } } },
+    });
+  }
+
+  async completeLab(userId: string, labId: string, xp: number, attemptId?: string) {
+    return prisma.$transaction(async (tx) => {
+      const existing = await tx.labProgress.findUnique({ where: { userId_labId: { userId, labId } } });
+      const firstCompletion = !existing?.completedAt;
+      const completedAt = existing?.completedAt ?? new Date();
+
+      const progress = await tx.labProgress.upsert({
+        where: { userId_labId: { userId, labId } },
+        update: { progressPct: 100, completedAt },
+        create: { userId, labId, progressPct: 100, completedAt },
+      });
+
+      if (attemptId) {
+        await tx.labAttempt.updateMany({
+          where: { id: attemptId, userId, labId },
+          data: { status: LabStatus.STOPPED, stoppedAt: new Date() },
+        });
+      }
+
+      if (firstCompletion) {
+        await tx.user.update({ where: { id: userId }, data: { xp: { increment: xp } } });
+        await tx.userProgress.upsert({
+          where: { userId },
+          update: { totalXp: { increment: xp }, labsCompleted: { increment: 1 } },
+          create: { userId, totalXp: xp, labsCompleted: 1 },
+        });
+        await tx.xPTransaction.create({
+          data: { userId, amount: xp, reason: "Lab completed", sourceType: "lab", sourceId: labId },
+        });
+      }
+
+      return { progress, firstCompletion };
     });
   }
 
