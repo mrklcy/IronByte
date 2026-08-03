@@ -1309,68 +1309,78 @@ function Dashboard({ auth, data, openChallenge, setView }: { auth: AuthState; da
   const pathProgress = data.courses.length && hasPersonalProgress ? Math.min(100, Math.max(8, Math.round((xp / 1600) * 100))) : 0;
   const totalModules = data.courses.reduce((total, course) => total + course.modules.length, 0);
   const featuredChallenge = data.challenges[0];
+  const primaryCourse = data.courses[0];
+  const primaryLab = data.labs[0];
 
   return (
     <div className="space-y-6">
-      <Card className="overflow-hidden border-primary/15 bg-surface p-6 shadow-soft lg:p-8">
-        <div className="grid gap-8 xl:grid-cols-[1.18fr_0.82fr] xl:items-stretch">
-          <div>
-            <p className="text-xs font-extrabold uppercase tracking-normal text-primary">TrainHack Security Academy</p>
-            <h1 className="mt-4 max-w-3xl break-words text-3xl font-extrabold tracking-normal sm:text-5xl">
+      <Card className="overflow-hidden p-0 shadow-soft">
+        <div className="border-b border-border bg-gradient-to-br from-white via-sky-50 to-teal-50 p-6 dark:from-slate-950 dark:via-sky-950/30 dark:to-teal-950/20 lg:p-8">
+          <div className="grid gap-6 xl:grid-cols-[1fr_360px] xl:items-end">
+            <div>
+              <Badge tone="teal">Training workspace</Badge>
+              <h1 className="mt-4 max-w-4xl break-words text-3xl font-extrabold tracking-normal sm:text-4xl">
               {auth.user ? `Welcome back, ${auth.user.displayName ?? auth.user.username}` : "Cybersecurity, learned by doing."}
-            </h1>
-            <p className="mt-3 max-w-2xl text-base leading-7 text-muted-foreground">
+              </h1>
+              <p className="mt-3 max-w-2xl text-base leading-7 text-muted-foreground">
               {hasPersonalProgress
                 ? "Continue your current path, inspect live labs, and keep turning solved challenges into measurable XP."
                 : "Start with guided paths, practice in machines, and solve challenges at your own pace. Your personal progress is empty until you complete real work."}
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Button onClick={() => setView("path")}>
-                <Play className="h-4 w-4" />
-                {hasPersonalProgress ? "Continue Learning" : "Start Learning"}
-              </Button>
-              <Button variant="outline" onClick={() => openChallenge()}>
-                <Flag className="h-4 w-4" />
-                Explore Challenges
-              </Button>
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Button onClick={() => setView("path")}>
+                  <Play className="h-4 w-4" />
+                  {hasPersonalProgress ? "Continue Learning" : "Start Learning"}
+                </Button>
+                <Button variant="outline" onClick={() => openChallenge()}>
+                  <Flag className="h-4 w-4" />
+                  Explore Challenges
+                </Button>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-white/80 p-5 shadow-sm dark:bg-slate-950/60">
+              <p className="text-xs font-extrabold uppercase text-muted-foreground">Current Progress</p>
+              <div className="mt-4 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-4xl font-extrabold tracking-normal">{xp.toLocaleString()}</p>
+                  <p className="mt-1 text-sm font-semibold text-muted-foreground">XP earned</p>
+                </div>
+                <Badge tone="indigo">{auth.user ? `Level ${auth.user.level}` : "Guest"}</Badge>
+              </div>
+              <Progress className="mt-5" value={pathProgress} />
+              <div className="mt-4 flex items-center justify-between text-sm font-bold text-muted-foreground">
+                <span>Path progress</span>
+                <span className="text-foreground">{pathProgress}%</span>
+              </div>
             </div>
           </div>
-          <div className="grid gap-3 rounded-2xl border border-border bg-background/70 p-4 shadow-sm sm:grid-cols-2">
-            <Metric label="XP earned" value={xp.toLocaleString()} />
-            <Metric label="Current rank" value={rankFor(auth.user, data.leaderboard)} />
-            <Metric label="Available modules" value={String(totalModules)} />
-            <Metric label="Path progress" value={`${pathProgress}%`} />
-          </div>
+        </div>
+        <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+          <DashboardMetric icon={Flag} label="Solved" value={String(solved)} detail={`${data.challenges.length} published challenges`} />
+          <DashboardMetric icon={MonitorDot} label="Machines" value={String(data.labs.length)} detail="Ready to launch" />
+          <DashboardMetric icon={GraduationCap} label="Paths" value={String(data.courses.length)} detail={`${totalModules} modules ready`} />
+          <DashboardMetric icon={Trophy} label="Rank" value={rankFor(auth.user, data.leaderboard)} detail={auth.user ? "Leaderboard position" : "Sign in to rank"} />
         </div>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={Flag} label="Solved Challenges" value={String(solved)} delta={data.challenges.length ? `${data.challenges.length} published` : "No challenges published"} index="01" />
-        <StatCard icon={MonitorDot} label="Available Machines" value={String(data.labs.length)} delta={auth.user ? "Start a lab to create a session" : "Log in to start machines"} index="02" />
-        <StatCard icon={GraduationCap} label="Learning Paths" value={String(data.courses.length)} delta={totalModules ? `${totalModules} modules ready` : "No published paths"} index="03" />
-        <StatCard icon={Star} label="Total XP" value={xp.toLocaleString()} delta={auth.user ? `Level ${auth.user.level}` : "Sign in to track"} index="04" />
+      <div className="grid gap-4 xl:grid-cols-3">
+        {primaryCourse && (
+          <DashboardActionCard icon={BookOpen} label="Next Path" title={primaryCourse.title} description={primaryCourse.summary} action="Open Path" onClick={() => setView("path")} />
+        )}
+        {primaryLab && (
+          <DashboardActionCard icon={MonitorDot} label="Machine Lab" title={primaryLab.name} description={primaryLab.description} action="Open Machines" onClick={() => setView("machines")} />
+        )}
+        {featuredChallenge && (
+          <DashboardActionCard icon={Flag} label="Featured Challenge" title={featuredChallenge.title} description={featuredChallenge.description} action="Solve" onClick={() => openChallenge(featuredChallenge.slug)} tone={difficultyTone(featuredChallenge.difficulty)} />
+        )}
       </div>
-
-      {featuredChallenge && (
-        <Card className="grid gap-5 p-5 md:grid-cols-[1fr_auto] md:items-center">
-          <div className="min-w-0">
-            <Badge tone={difficultyTone(featuredChallenge.difficulty)}>{featuredChallenge.difficulty}</Badge>
-            <h2 className="mt-3 text-xl font-extrabold">{featuredChallenge.title}</h2>
-            <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{featuredChallenge.description}</p>
-          </div>
-          <Button onClick={() => openChallenge(featuredChallenge.slug)}>
-            <Flag className="h-4 w-4" />
-            Solve Featured
-          </Button>
-        </Card>
-      )}
 
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
         <LearningProgress auth={auth} courses={data.courses} setView={setView} />
         <RecentChallenges challenges={data.challenges} openChallenge={openChallenge} />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_0.85fr_0.85fr]">
+      <div className="grid gap-6 2xl:grid-cols-[1.15fr_0.85fr_0.85fr]">
         <ActiveLabs auth={auth} labs={data.labs} />
         <Leaderboard leaders={data.leaderboard} />
         <ActivityFeed />
@@ -1893,20 +1903,53 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatCard({ icon: Icon, label, value, delta, index }: { icon: typeof Flag; label: string; value: string; delta: string; index?: string }) {
+function DashboardMetric({ icon: Icon, label, value, detail }: { icon: typeof Flag; label: string; value: string; detail: string }) {
   return (
-    <Card className="group p-5 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-soft">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          {index && <p className="mb-3 text-sm font-extrabold text-primary/70">{index}</p>}
-          <p className="text-sm font-semibold text-muted-foreground">{label}</p>
-          <p className="mt-2 text-3xl font-extrabold">{value}</p>
-          <p className="mt-2 text-sm text-muted-foreground">{delta}</p>
+    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-border bg-muted/35 p-4">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+        <Icon className="h-5 w-5" />
+      </span>
+      <div className="min-w-0">
+        <p className="truncate text-xs font-extrabold uppercase text-muted-foreground">{label}</p>
+        <div className="mt-1 flex min-w-0 items-baseline gap-2">
+          <p className="truncate text-2xl font-extrabold tracking-normal">{value}</p>
+          <p className="hidden truncate text-xs font-semibold text-muted-foreground sm:block">{detail}</p>
         </div>
-        <span className="grid h-11 w-11 place-items-center rounded-2xl bg-primary/10 text-primary transition-transform group-hover:scale-105">
+      </div>
+    </div>
+  );
+}
+
+function DashboardActionCard({
+  icon: Icon,
+  label,
+  title,
+  description,
+  action,
+  onClick,
+  tone = "indigo",
+}: {
+  icon: typeof Flag;
+  label: string;
+  title: string;
+  description: string;
+  action: string;
+  onClick: () => void;
+  tone?: "indigo" | "teal" | "green" | "amber" | "red" | "slate";
+}) {
+  return (
+    <Card className="group flex min-h-[220px] flex-col p-5 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-soft">
+      <div className="flex items-start justify-between gap-3">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
           <Icon className="h-5 w-5" />
         </span>
+        <Badge tone={tone}>{label}</Badge>
       </div>
+      <div className="mt-5 min-w-0 flex-1">
+        <h2 className="line-clamp-2 text-xl font-extrabold tracking-normal">{title}</h2>
+        <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">{description}</p>
+      </div>
+      <Button className="mt-5 w-full" variant="outline" onClick={onClick}>{action}</Button>
     </Card>
   );
 }
