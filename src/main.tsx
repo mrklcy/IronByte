@@ -1377,11 +1377,11 @@ function Dashboard({ auth, data, openChallenge, setView }: { auth: AuthState; da
 
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
         <LearningProgress auth={auth} courses={data.courses} setView={setView} />
-        <RecentChallenges challenges={data.challenges} openChallenge={openChallenge} />
+        <RecentChallenges challenges={data.challenges} openChallenge={openChallenge} maxItems={5} />
       </div>
 
-      <div className="grid gap-6 2xl:grid-cols-[1.15fr_0.85fr_0.85fr]">
-        <ActiveLabs auth={auth} labs={data.labs} />
+      <div className="grid gap-6 xl:grid-cols-2 2xl:grid-cols-[1fr_0.75fr_0.75fr]">
+        <ActiveLabs auth={auth} labs={data.labs} dashboard onBrowse={() => setView("labs")} />
         <Leaderboard leaders={data.leaderboard} />
         <ActivityFeed />
       </div>
@@ -1996,7 +1996,9 @@ function LearningProgress({ auth, courses, setView }: { auth: AuthState; courses
   );
 }
 
-function RecentChallenges({ challenges, openChallenge }: { challenges: Challenge[]; openChallenge: (slug?: string) => void }) {
+function RecentChallenges({ challenges, openChallenge, maxItems }: { challenges: Challenge[]; openChallenge: (slug?: string) => void; maxItems?: number }) {
+  const visibleChallenges = typeof maxItems === "number" ? challenges.slice(0, maxItems) : challenges;
+
   return (
     <section>
       <SectionHeader title="Recent Challenges" action={<Button variant="ghost" size="sm" onClick={() => openChallenge()}>Browse</Button>} />
@@ -2008,7 +2010,7 @@ function RecentChallenges({ challenges, openChallenge }: { challenges: Challenge
             <p className="mt-2 text-sm leading-6 text-muted-foreground">Challenges from the backend will appear here as soon as they are available.</p>
           </div>
         )}
-        {challenges.map((challenge) => (
+        {visibleChallenges.map((challenge) => (
           <div key={challenge.slug} className="p-5 transition-colors hover:bg-muted/45">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
@@ -2023,14 +2025,22 @@ function RecentChallenges({ challenges, openChallenge }: { challenges: Challenge
             </div>
           </div>
         ))}
+        {maxItems && challenges.length > maxItems && (
+          <div className="p-4">
+            <Button className="w-full" variant="outline" size="sm" onClick={() => openChallenge()}>
+              View all {challenges.length} challenges
+            </Button>
+          </div>
+        )}
       </Card>
     </section>
   );
 }
 
-function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
+function ActiveLabs({ auth, labs, dashboard = false, onBrowse }: { auth: AuthState; labs: Lab[]; dashboard?: boolean; onBrowse?: () => void }) {
   const { message, loading, actionSlug, flagSlug, loadAttempts, toggleLab, submitLabFlag, runningFor } = useLabSessions(auth);
   const runningLabs = labs.filter((lab) => runningFor(lab.slug));
+  const visibleLabs = dashboard ? labs.slice(0, 3) : labs;
 
   return (
     <section>
@@ -2040,16 +2050,16 @@ function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
       />
       {message && <StatusPanel tone="info" message={message} />}
       {runningLabs.length > 0 && (
-        <div className="mb-5 grid gap-4 lg:grid-cols-2">
-          {runningLabs.map((lab) => {
+        <div className={cn("mb-5 grid gap-4", !dashboard && "lg:grid-cols-2")}>
+          {(dashboard ? runningLabs.slice(0, 1) : runningLabs).map((lab) => {
             const running = runningFor(lab.slug)!;
             return <LabSessionPanel key={lab.slug} lab={lab} attempt={running} flagBusy={flagSlug === lab.slug} onSubmitFlag={submitLabFlag} compact />;
           })}
         </div>
       )}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className={cn("grid gap-4", dashboard ? "grid-cols-1" : "md:grid-cols-2 xl:grid-cols-3")}>
         {!labs.length && <EmptyLabState />}
-        {labs.map((lab) => {
+        {visibleLabs.map((lab) => {
           const running = runningFor(lab.slug);
           return (
             <MachineCard
@@ -2064,6 +2074,13 @@ function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
             />
           );
         })}
+        {dashboard && labs.length > visibleLabs.length && (
+          <Card className="p-4">
+            <Button className="w-full" variant="outline" size="sm" onClick={onBrowse}>
+              Showing {visibleLabs.length} of {labs.length} labs
+            </Button>
+          </Card>
+        )}
       </div>
     </section>
   );
