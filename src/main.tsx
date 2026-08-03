@@ -30,6 +30,7 @@ import {
   Terminal,
   Trophy,
   Users,
+  X,
   XCircle,
 } from "lucide-react";
 import { Badge, Button, Card, Input, Progress, SectionHeader } from "./components/ui";
@@ -219,6 +220,28 @@ function difficultyTone(difficulty?: Difficulty) {
   return "green";
 }
 
+function isLiveAttempt(attempt?: LabAttempt) {
+  if (!attempt || attempt.status !== "RUNNING") return false;
+  if (!attempt.expiresAt) return true;
+  return new Date(attempt.expiresAt).getTime() > Date.now();
+}
+
+function timeLeftLabel(expiresAt?: string | null) {
+  if (!expiresAt) return "No expiry";
+  const remaining = new Date(expiresAt).getTime() - Date.now();
+  if (remaining <= 0) return "Expired";
+  const minutes = Math.ceil(remaining / 60000);
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours <= 0) return `${mins}m left`;
+  return mins ? `${hours}h ${mins}m left` : `${hours}h left`;
+}
+
+function shortDateTime(value?: string | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 function roleNames(user?: User | null) {
   return (user?.roles ?? [])
     .map((role) => {
@@ -290,6 +313,66 @@ function getApiErrorMessage(payload: ApiResponse<unknown>) {
     return `${label}: ${issue.message ?? payload.message}`;
   }
   return payload.message || "Request failed.";
+}
+
+function useLabSessions(auth: AuthState) {
+  const [attempts, setAttempts] = useState<LabAttempt[]>([]);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [actionSlug, setActionSlug] = useState("");
+
+  async function loadAttempts() {
+    if (!auth.accessToken) {
+      setAttempts([]);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = await api<LabAttempt[]>("/lab-attempts", { token: auth.accessToken });
+      setAttempts(payload.data.filter(isLiveAttempt));
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load lab sessions.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadAttempts();
+  }, [auth.accessToken]);
+
+  async function toggleLab(lab: Lab) {
+    if (!auth.accessToken) {
+      setMessage("Log in to start and stop machines.");
+      return;
+    }
+
+    const running = attempts.find((attempt) => attempt.lab.slug === lab.slug && isLiveAttempt(attempt));
+    setActionSlug(lab.slug);
+    try {
+      if (running) {
+        const payload = await api<LabAttempt>(`/lab-attempts/${running.id}/stop`, { method: "POST", token: auth.accessToken });
+        setAttempts((current) => current.filter((attempt) => attempt.id !== payload.data.id));
+        setMessage(`${lab.name} stopped.`);
+      } else {
+        const payload = await api<LabAttempt>(`/labs/${lab.slug}/start`, { method: "POST", token: auth.accessToken });
+        setAttempts((current) => [payload.data, ...current.filter((attempt) => attempt.lab.slug !== lab.slug)]);
+        setMessage(`${lab.name} started. Session expires ${shortDateTime(payload.data.expiresAt)}.`);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Machine action failed.");
+    } finally {
+      setActionSlug("");
+    }
+  }
+
+  function runningFor(slug: string) {
+    return attempts.find((attempt) => attempt.lab.slug === slug && isLiveAttempt(attempt));
+  }
+
+  return { attempts, message, loading, actionSlug, loadAttempts, toggleLab, runningFor };
 }
 
 function App() {
@@ -423,6 +506,7 @@ function App() {
   }
 
   const isAuthView = view === "login" || view === "signup" || view === "admin-auth";
+  const appView: View = !isAdminPort && auth.user && (isAuthView || view === "landing") ? "dashboard" : view;
 
   if (isAdminPort) {
     if (auth.accessToken && authChecking) {
@@ -462,7 +546,7 @@ function App() {
     );
   }
 
-  if (!isAdminPort && view === "landing") {
+  if (!isAdminPort && appView === "landing") {
     return (
       <LandingPage
         data={data}
@@ -486,7 +570,7 @@ function App() {
     );
   }
 
-  if (isAuthView) {
+  if (isAuthView && !auth.user) {
     return (
       <div className="min-h-screen bg-background text-foreground">
         <AnimatePresence mode="wait">
@@ -513,10 +597,10 @@ function App() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="flex">
-        <Sidebar view={view} setView={setView} />
-        <main className="min-w-0 flex-1">
+        <Sidebar view={appView} setView={setView} />
+        <main className="min-w-0 flex-1 lg:pl-72">
           <Topbar
-            view={view}
+            view={appView}
             setView={setView}
             dark={dark}
             setDark={setDark}
@@ -530,7 +614,7 @@ function App() {
           />
           <AnimatePresence mode="wait">
             <motion.div
-              key={view}
+              key={appView}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
@@ -539,21 +623,21 @@ function App() {
             >
               {notice && <StatusPanel tone="error" message={notice} />}
               {loading && <StatusPanel tone="info" message="Loading platform data..." />}
-              {view === "dashboard" && <Dashboard auth={auth} data={data} openChallenge={openChallenge} setView={setView} />}
-              {view === "challenge" && <ChallengesView auth={auth} setAuth={setAuth} challenges={data.challenges} selectedChallenge={challenge} openChallenge={openChallenge} />}
-              {view === "path" && <LearningPath auth={auth} courses={data.courses} />}
-              {view === "machines" && <Machines auth={auth} labs={data.labs} />}
-              {view === "labs" && <LabsView auth={auth} labs={data.labs} />}
-              {view === "leaderboard" && <LeaderboardView leaders={data.leaderboard} auth={auth} />}
-              {view === "certificates" && <CertificatesView auth={auth} data={data} />}
-              {view === "community" && <CommunityView auth={auth} />}
-              {view === "profile" && <ProfileView auth={auth} />}
-              {view === "settings" && <SettingsView auth={auth} dark={dark} setDark={setDark} onLogout={logout} />}
+              {appView === "dashboard" && <Dashboard auth={auth} data={data} openChallenge={openChallenge} setView={setView} />}
+              {appView === "challenge" && <ChallengesView auth={auth} setAuth={setAuth} challenges={data.challenges} selectedChallenge={challenge} openChallenge={openChallenge} />}
+              {appView === "path" && <LearningPath auth={auth} courses={data.courses} />}
+              {appView === "machines" && <Machines auth={auth} labs={data.labs} />}
+              {appView === "labs" && <LabsView auth={auth} labs={data.labs} />}
+              {appView === "leaderboard" && <LeaderboardView leaders={data.leaderboard} auth={auth} />}
+              {appView === "certificates" && <CertificatesView auth={auth} data={data} />}
+              {appView === "community" && <CommunityView auth={auth} />}
+              {appView === "profile" && <ProfileView auth={auth} />}
+              {appView === "settings" && <SettingsView auth={auth} dark={dark} setDark={setDark} onLogout={logout} />}
             </motion.div>
           </AnimatePresence>
         </main>
       </div>
-      <MobileNav view={view} setView={setView} />
+      <MobileNav view={appView} setView={setView} />
     </div>
   );
 }
@@ -1058,11 +1142,15 @@ function TrainHackLogo({ compact = false }: { compact?: boolean }) {
 
 function Sidebar({ view, setView }: { view: string; setView: (view: View) => void }) {
   return (
-    <aside className="sticky top-0 hidden h-screen w-72 shrink-0 border-r border-border bg-surface px-4 py-5 lg:block">
-      <button onClick={() => setView("dashboard")} className="mb-8 flex w-full items-center gap-3 rounded-2xl px-2 text-left">
-        <TrainHackLogo />
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 shrink-0 border-r border-border bg-surface px-4 py-5 lg:flex lg:flex-col">
+      <button onClick={() => setView("dashboard")} className="mb-7 flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-1 text-left transition-colors hover:bg-muted/60">
+        <TrainHackLogo compact />
+        <span className="min-w-0">
+          <span className="block truncate text-lg font-extrabold tracking-normal">TrainHack</span>
+          <span className="block truncate text-xs font-medium text-muted-foreground">Security Academy</span>
+        </span>
       </button>
-      <nav className="space-y-1" aria-label="Primary navigation">
+      <nav className="mt-8 grid gap-2 px-2" aria-label="Primary navigation">
         {navItems.map(([label, Icon, target]) => {
           const active = view === target;
           return (
@@ -1070,13 +1158,13 @@ function Sidebar({ view, setView }: { view: string; setView: (view: View) => voi
               key={label}
               onClick={() => setView(target)}
               className={cn(
-                "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-muted-foreground transition-colors",
+                "flex h-12 w-full items-center gap-3 rounded-xl px-3 text-sm font-bold text-muted-foreground transition-colors",
                 active && "bg-primary/10 text-primary",
                 !active && "hover:bg-muted hover:text-foreground",
               )}
             >
-              <Icon className="h-4 w-4" />
-              {label}
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{label}</span>
             </button>
           );
         })}
@@ -1845,44 +1933,14 @@ function RecentChallenges({ challenges, openChallenge }: { challenges: Challenge
 }
 
 function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
-  const [attempts, setAttempts] = useState<LabAttempt[]>([]);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    if (!auth.accessToken) {
-      setAttempts([]);
-      return;
-    }
-    api<LabAttempt[]>("/lab-attempts", { token: auth.accessToken })
-      .then((payload) => setAttempts(payload.data))
-      .catch((error: Error) => setMessage(error.message));
-  }, [auth.accessToken]);
-
-  async function toggleLab(lab: Lab) {
-    if (!auth.accessToken) {
-      setMessage("Log in to start and stop labs.");
-      return;
-    }
-
-    const running = attempts.find((attempt) => attempt.lab.slug === lab.slug && attempt.status === "RUNNING");
-    try {
-      if (running) {
-        const payload = await api<LabAttempt>(`/lab-attempts/${running.id}/stop`, { method: "POST", token: auth.accessToken });
-        setAttempts((current) => current.filter((attempt) => attempt.id !== payload.data.id));
-        setMessage(`${lab.name} stopped.`);
-      } else {
-        const payload = await api<LabAttempt>(`/labs/${lab.slug}/start`, { method: "POST", token: auth.accessToken });
-        setAttempts((current) => [payload.data, ...current.filter((attempt) => attempt.lab.slug !== lab.slug)]);
-        setMessage(`${lab.name} started.`);
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Lab action failed.");
-    }
-  }
+  const { message, loading, actionSlug, loadAttempts, toggleLab, runningFor } = useLabSessions(auth);
 
   return (
     <section>
-      <SectionHeader title="Active Labs" />
+      <SectionHeader
+        title="Active Labs"
+        action={<Button variant="outline" size="sm" onClick={loadAttempts} disabled={loading}>{loading ? "Refreshing" : "Refresh"}</Button>}
+      />
       {message && <StatusPanel tone="info" message={message} />}
       <div className="space-y-4">
         {!labs.length && (
@@ -1893,21 +1951,22 @@ function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
           </Card>
         )}
         {labs.map((lab) => {
-          const running = attempts.find((attempt) => attempt.lab.slug === lab.slug && attempt.status === "RUNNING");
+          const running = runningFor(lab.slug);
           return (
             <Card key={lab.slug} className="p-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="font-bold">{lab.name}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">{lab.os} | {lab.timeLimitMinutes} minutes</p>
-                  {running?.expiresAt && <p className="mt-1 text-xs font-semibold text-primary">Expires {new Date(running.expiresAt).toLocaleTimeString()}</p>}
+                  <p className="mt-1 text-sm text-muted-foreground">{lab.os} | {lab.category?.name ?? "Lab"} | {lab.timeLimitMinutes} minutes</p>
+                  {running?.expiresAt && <p className="mt-1 text-xs font-semibold text-primary">{timeLeftLabel(running.expiresAt)} | expires {shortDateTime(running.expiresAt)}</p>}
                 </div>
                 <Badge className="shrink-0" tone={running ? "teal" : "green"}>{running ? "Running" : "Available"}</Badge>
               </div>
-              <div className="mt-4 flex items-center justify-between">
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">{lab.description}</p>
+              <div className="mt-4 flex items-center justify-between gap-3">
                 <Badge tone={difficultyTone(lab.difficulty)}>{lab.difficulty}</Badge>
-                <Button variant="outline" size="sm" onClick={() => toggleLab(lab)}>
-                  {running ? "Stop" : "Start"}
+                <Button variant={running ? "outline" : "primary"} size="sm" onClick={() => toggleLab(lab)} disabled={actionSlug === lab.slug}>
+                  {actionSlug === lab.slug ? "Working" : running ? "Stop Lab" : "Start Lab"}
                 </Button>
               </div>
             </Card>
@@ -1979,62 +2038,79 @@ function ActivityFeed() {
 }
 
 function Machines({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
-  const [attempts, setAttempts] = useState<LabAttempt[]>([]);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    if (!auth.accessToken) {
-      setAttempts([]);
-      return;
-    }
-    api<LabAttempt[]>("/lab-attempts", { token: auth.accessToken })
-      .then((payload) => setAttempts(payload.data))
-      .catch((error: Error) => setMessage(error.message));
-  }, [auth.accessToken]);
-
-  async function toggleMachine(lab: Lab) {
-    if (!auth.accessToken) {
-      setMessage("Log in to start machines.");
-      return;
-    }
-
-    const running = attempts.find((attempt) => attempt.lab.slug === lab.slug && attempt.status === "RUNNING");
-    try {
-      if (running) {
-        const payload = await api<LabAttempt>(`/lab-attempts/${running.id}/stop`, { method: "POST", token: auth.accessToken });
-        setAttempts((current) => current.filter((attempt) => attempt.id !== payload.data.id));
-      } else {
-        const payload = await api<LabAttempt>(`/labs/${lab.slug}/start`, { method: "POST", token: auth.accessToken });
-        setAttempts((current) => [payload.data, ...current.filter((attempt) => attempt.lab.slug !== lab.slug)]);
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Machine action failed.");
-    }
-  }
+  const { message, loading, actionSlug, loadAttempts, toggleLab, runningFor } = useLabSessions(auth);
+  const runningCount = labs.filter((lab) => runningFor(lab.slug)).length;
+  const availableCount = Math.max(0, labs.length - runningCount);
 
   return (
     <div className="space-y-6">
-      <SectionHeader title="Machines" action={<Badge tone={attempts.length ? "green" : "slate"}>{attempts.length ? `${attempts.length} running` : "idle"}</Badge>} />
+      <Card className="p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <Badge tone={runningCount ? "teal" : "slate"}>{runningCount ? `${runningCount} running` : "All machines idle"}</Badge>
+            <h1 className="mt-3 text-3xl font-extrabold">Machines</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Start a lab machine, track the active runtime, and stop it when your session is done.</p>
+          </div>
+          <Button variant="outline" onClick={loadAttempts} disabled={loading}>{loading ? "Refreshing" : "Refresh Sessions"}</Button>
+        </div>
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-border bg-muted/40 p-4">
+            <p className="text-xs font-bold uppercase text-muted-foreground">Catalog</p>
+            <p className="mt-2 text-2xl font-extrabold">{labs.length}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-muted/40 p-4">
+            <p className="text-xs font-bold uppercase text-muted-foreground">Running</p>
+            <p className="mt-2 text-2xl font-extrabold text-primary">{runningCount}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-muted/40 p-4">
+            <p className="text-xs font-bold uppercase text-muted-foreground">Available</p>
+            <p className="mt-2 text-2xl font-extrabold">{availableCount}</p>
+          </div>
+        </div>
+      </Card>
       {message && <StatusPanel tone="info" message={message} />}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {!labs.length && (
+          <Card className="p-6">
+            <MonitorDot className="h-8 w-8 text-primary" />
+            <h3 className="mt-4 font-bold">No machines available</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">Published lab machines will appear here from the backend catalog.</p>
+          </Card>
+        )}
         {labs.map((lab) => {
-          const running = attempts.find((attempt) => attempt.lab.slug === lab.slug && attempt.status === "RUNNING");
+          const running = runningFor(lab.slug);
           return (
             <Card key={lab.slug} className="p-5">
               <div className="flex items-start justify-between gap-3">
                 <span className="grid h-11 w-11 place-items-center rounded-2xl bg-primary/10 text-primary">
                   <MonitorDot className="h-5 w-5" />
                 </span>
-                <Badge tone={running ? "green" : "slate"}>{running ? "Running" : "Stopped"}</Badge>
+                <Badge tone={running ? "teal" : "slate"}>{running ? "Running" : "Stopped"}</Badge>
               </div>
               <h2 className="mt-4 text-lg font-bold">{lab.name}</h2>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">{lab.description}</p>
-              <div className="mt-4 flex items-center justify-between text-sm font-semibold text-muted-foreground">
-                <span>{lab.os}</span>
-                <span>{lab.timeLimitMinutes}m</span>
+              <div className="mt-4 grid gap-2 text-sm font-semibold text-muted-foreground">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Operating system</span>
+                  <span className="text-foreground">{lab.os}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Session limit</span>
+                  <span className="text-foreground">{lab.timeLimitMinutes}m</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Difficulty</span>
+                  <Badge tone={difficultyTone(lab.difficulty)}>{lab.difficulty}</Badge>
+                </div>
               </div>
-              <Button className="mt-4 w-full" variant={running ? "outline" : "primary"} onClick={() => toggleMachine(lab)}>
-                {running ? "Stop Machine" : "Start Machine"}
+              {running && (
+                <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                  <p className="text-sm font-bold text-primary">{timeLeftLabel(running.expiresAt)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Started {shortDateTime(running.startedAt)} | expires {shortDateTime(running.expiresAt)}</p>
+                </div>
+              )}
+              <Button className="mt-4 w-full" variant={running ? "outline" : "primary"} onClick={() => toggleLab(lab)} disabled={actionSlug === lab.slug}>
+                {actionSlug === lab.slug ? "Working" : running ? "Stop Machine" : "Start Machine"}
               </Button>
             </Card>
           );
@@ -2047,7 +2123,11 @@ function Machines({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
 function LabsView({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
   return (
     <div className="space-y-6">
-      <SectionHeader title="Labs" />
+      <Card className="p-6">
+        <Badge tone="teal">Hands-on sessions</Badge>
+        <h1 className="mt-3 text-3xl font-extrabold">Labs</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Use labs to launch machines, practice skills, and keep track of active sessions from one place.</p>
+      </Card>
       <ActiveLabs auth={auth} labs={labs} />
     </div>
   );
@@ -2589,7 +2669,6 @@ function ChallengesView({
   auth,
   setAuth,
   challenges,
-  selectedChallenge,
   openChallenge,
 }: {
   auth: AuthState;
@@ -2600,11 +2679,17 @@ function ChallengesView({
 }) {
   const [category, setCategory] = useState<(typeof challengeCategories)[number]>("All");
   const [difficulty, setDifficulty] = useState<ChallengeDifficultyFilter>("All");
+  const [modalChallenge, setModalChallenge] = useState<Challenge | null>(null);
   const filtered = challenges.filter((challenge) => {
     const matchesCategory = category === "All" || challenge.category?.name === category;
     const matchesDifficulty = difficulty === "All" || challenge.difficulty === difficulty;
     return matchesCategory && matchesDifficulty;
   });
+
+  function openChallengeModal(challenge: Challenge) {
+    openChallenge(challenge.slug);
+    setModalChallenge(challenge);
+  }
 
   return (
     <div className="space-y-6">
@@ -2646,40 +2731,95 @@ function ChallengesView({
         </div>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.2fr]">
-        <Card className="divide-y divide-border overflow-hidden">
-          {filtered.map((challenge) => (
-            <button
-              key={challenge.slug}
-              onClick={() => openChallenge(challenge.slug)}
-              className={cn(
-                "block w-full p-5 text-left transition-colors hover:bg-muted/45",
-                selectedChallenge?.slug === challenge.slug && "bg-primary/5",
-              )}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-extrabold uppercase text-primary">{challenge.category?.name ?? "Challenge"}</p>
-                  <h2 className="mt-2 text-lg font-bold">{challenge.title}</h2>
-                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">{challenge.description}</p>
-                </div>
-                <Badge tone={difficultyTone(challenge.difficulty)}>{challenge.difficulty}</Badge>
-              </div>
-              <p className="mt-3 text-sm font-bold text-primary">{challenge.baseXp} XP</p>
-            </button>
-          ))}
-          {!filtered.length && <p className="p-5 text-sm font-semibold text-muted-foreground">No challenges match this filter yet.</p>}
-        </Card>
-        <ChallengeDetail auth={auth} setAuth={setAuth} challenge={selectedChallenge ?? filtered[0]} />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {filtered.map((challenge) => (
+          <button
+            key={challenge.slug}
+            onClick={() => openChallengeModal(challenge)}
+            className="group flex min-h-[238px] flex-col rounded-2xl border border-border bg-surface p-5 text-left shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-primary/30 hover:shadow-soft"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary transition-transform group-hover:scale-105">
+                <Flag className="h-5 w-5" />
+              </span>
+              <Badge className="shrink-0" tone={difficultyTone(challenge.difficulty)}>{challenge.difficulty}</Badge>
+            </div>
+            <div className="mt-5 min-w-0 flex-1">
+              <p className="text-xs font-extrabold uppercase text-primary">{challenge.category?.name ?? "Challenge"}</p>
+              <h2 className="mt-2 break-words text-xl font-extrabold">{challenge.title}</h2>
+              <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">{challenge.description}</p>
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
+              <span className="text-sm font-extrabold text-primary">{challenge.baseXp} XP</span>
+              <span className="text-sm font-bold text-muted-foreground transition-colors group-hover:text-primary">Open details</span>
+            </div>
+          </button>
+        ))}
+        {!filtered.length && (
+          <Card className="p-5 md:col-span-2 xl:col-span-3">
+            <Flag className="h-8 w-8 text-primary" />
+            <h2 className="mt-4 font-bold">No challenges match this filter</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">Try another category or difficulty to find more challenges.</p>
+          </Card>
+        )}
       </div>
+
+      <AnimatePresence>
+        {modalChallenge && (
+          <motion.div
+            className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/70 px-4 py-6 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="challenge-modal-title"
+              className="relative w-full max-w-6xl"
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ duration: 0.2 }}
+            >
+              <Button
+                className="absolute right-3 top-3 z-10 bg-surface/90"
+                variant="outline"
+                size="icon"
+                onClick={() => setModalChallenge(null)}
+                aria-label="Close challenge details"
+                title="Close"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+              <ChallengeDetail auth={auth} setAuth={setAuth} challenge={modalChallenge} modal />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function ChallengeDetail({ auth, setAuth, challenge }: { auth: AuthState; setAuth: (auth: AuthState) => void; challenge?: Challenge }) {
+function ChallengeDetail({
+  auth,
+  setAuth,
+  challenge,
+  modal = false,
+}: {
+  auth: AuthState;
+  setAuth: (auth: AuthState) => void;
+  challenge?: Challenge;
+  modal?: boolean;
+}) {
   const [flag, setFlag] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setFlag("");
+    setMessage("");
+  }, [challenge?.slug]);
 
   async function submitFlag() {
     if (!challenge || !auth.accessToken) return;
@@ -2703,32 +2843,27 @@ function ChallengeDetail({ auth, setAuth, challenge }: { auth: AuthState; setAut
   if (!challenge) return <StatusPanel tone="info" message="No challenge is published yet." />;
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        Dashboard / Challenges / <span className="font-semibold text-foreground">{challenge.title}</span>
-      </div>
-      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
-        <Card className="p-6 lg:p-8">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <Badge tone="indigo">{challenge.category?.name ?? "Challenge"}</Badge>
-              <h1 className="mt-4 break-words text-2xl font-extrabold sm:text-3xl">{challenge.title}</h1>
-              <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">{challenge.description}</p>
-            </div>
-            <div className="flex gap-2">
-              <Badge tone={difficultyTone(challenge.difficulty)}>{challenge.difficulty}</Badge>
-              <Badge tone="teal">{challenge.baseXp} XP</Badge>
-            </div>
+    <Card className={cn("overflow-hidden", modal ? "max-h-[88vh] overflow-y-auto p-5 sm:p-6 lg:p-8" : "p-6 lg:p-8")}>
+      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="indigo">{challenge.category?.name ?? "Challenge"}</Badge>
+            <Badge tone={difficultyTone(challenge.difficulty)}>{challenge.difficulty}</Badge>
+            <Badge tone="teal">{challenge.baseXp} XP</Badge>
           </div>
-          <div className="mt-8 grid gap-5 md:grid-cols-2">
+          <h1 id="challenge-modal-title" className="mt-4 break-words pr-12 text-2xl font-extrabold sm:text-3xl">{challenge.title}</h1>
+          <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">{challenge.description}</p>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
             {["Find the exposed route", "Identify the trusted header", "Submit the recovered flag", "Document the bypass"].map((item) => (
-              <div key={item} className="flex items-center gap-3 rounded-2xl border border-border bg-muted/35 p-4">
-                <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <div key={item} className="flex min-h-16 items-center gap-3 rounded-xl border border-border bg-muted/35 p-4">
+                <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
                 <span className="text-sm font-semibold">{item}</span>
               </div>
             ))}
           </div>
-          <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-950 p-5 text-slate-100">
+
+          <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950 p-5 text-slate-100">
             <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
               <Terminal className="h-4 w-4" />
               request.log
@@ -2738,16 +2873,19 @@ Host: lab.trainhack.local
 X-Forwarded-For: 127.0.0.1
 X-TrainHack-Trace: enabled`}</code></pre>
           </div>
-        </Card>
-        <aside className="space-y-5">
+        </div>
+
+        <aside className="space-y-4">
           <AuthCard auth={auth} setAuth={setAuth} />
           <Card className="p-5">
             <h2 className="font-bold">Submit Flag</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">Enter the captured flag for this challenge.</p>
             <Input className="mt-4" value={flag} onChange={(event) => setFlag(event.target.value)} placeholder="TH{...}" aria-label="Flag submission" />
             <Button className="mt-3 w-full" disabled={!auth.accessToken || !flag || submitting} onClick={submitFlag}>
-              Submit Answer
+              {submitting ? "Submitting..." : "Submit Flag"}
             </Button>
             {message && <p className="mt-3 text-sm font-semibold text-muted-foreground">{message}</p>}
+            {!auth.accessToken && <p className="mt-3 text-xs font-semibold text-muted-foreground">Log in to submit a flag.</p>}
           </Card>
           <Card className="p-5">
             <h2 className="font-bold">Helpful Hints</h2>
@@ -2760,7 +2898,7 @@ X-TrainHack-Trace: enabled`}</code></pre>
           </Card>
         </aside>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -2854,17 +2992,7 @@ function AuthCard({
     show: { opacity: 1, y: 0, transition: { duration: 0.36, ease: [0.22, 1, 0.36, 1] } },
   };
 
-  if (auth.user) {
-    return (
-      <Card className={cn("p-5", elevated && "border-primary/20 bg-surface/95 shadow-lift")}>
-        <h2 className="font-bold">{auth.user.displayName ?? auth.user.username}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{auth.user.email}</p>
-        <Button className="mt-4 w-full" variant="outline" onClick={() => setAuth({ user: null, accessToken: "", refreshToken: "" })}>
-          Logout
-        </Button>
-      </Card>
-    );
-  }
+  if (auth.user) return null;
 
   return (
     <motion.div initial={{ opacity: 0, y: 16, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.48, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}>

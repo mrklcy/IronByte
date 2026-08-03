@@ -103,7 +103,12 @@ export class ContentRepository {
     });
   }
 
-  activeLabAttempts(userId: string) {
+  async activeLabAttempts(userId: string) {
+    await prisma.labAttempt.updateMany({
+      where: { userId, status: LabStatus.RUNNING, expiresAt: { lte: new Date() } },
+      data: { status: LabStatus.EXPIRED, stoppedAt: new Date() },
+    });
+
     return prisma.labAttempt.findMany({
       where: { userId, status: LabStatus.RUNNING },
       orderBy: { createdAt: "desc" },
@@ -114,10 +119,11 @@ export class ContentRepository {
   async startLab(slug: string, userId: string) {
     const lab = await prisma.lab.findUnique({ where: { slug } });
     if (!lab || lab.status !== ContentStatus.PUBLISHED) return null;
+    const now = new Date();
 
     await prisma.labAttempt.updateMany({
       where: { userId, labId: lab.id, status: LabStatus.RUNNING },
-      data: { status: LabStatus.STOPPED, stoppedAt: new Date() },
+      data: { status: LabStatus.STOPPED, stoppedAt: now },
     });
 
     return prisma.labAttempt.create({
@@ -125,8 +131,8 @@ export class ContentRepository {
         userId,
         labId: lab.id,
         status: LabStatus.RUNNING,
-        startedAt: new Date(),
-        expiresAt: new Date(Date.now() + lab.timeLimitMinutes * 60 * 1000),
+        startedAt: now,
+        expiresAt: new Date(now.getTime() + lab.timeLimitMinutes * 60 * 1000),
       },
       include: { lab: { include: { category: true } } },
     });
