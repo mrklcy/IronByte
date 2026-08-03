@@ -1987,6 +1987,7 @@ function RecentChallenges({ challenges, openChallenge }: { challenges: Challenge
 
 function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
   const { message, loading, actionSlug, flagSlug, loadAttempts, toggleLab, submitLabFlag, runningFor } = useLabSessions(auth);
+  const runningLabs = labs.filter((lab) => runningFor(lab.slug));
 
   return (
     <section>
@@ -1995,35 +1996,29 @@ function ActiveLabs({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
         action={<Button variant="outline" size="sm" onClick={loadAttempts} disabled={loading}>{loading ? "Refreshing" : "Refresh"}</Button>}
       />
       {message && <StatusPanel tone="info" message={message} />}
-      <div className="space-y-4">
-        {!labs.length && (
-          <Card className="p-5">
-            <MonitorDot className="h-8 w-8 text-primary" />
-            <h3 className="mt-4 font-bold">No labs available</h3>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">Machine sessions will be listed here once labs are published.</p>
-          </Card>
-        )}
+      {runningLabs.length > 0 && (
+        <div className="mb-5 grid gap-4 lg:grid-cols-2">
+          {runningLabs.map((lab) => {
+            const running = runningFor(lab.slug)!;
+            return <LabSessionPanel key={lab.slug} lab={lab} attempt={running} flagBusy={flagSlug === lab.slug} onSubmitFlag={submitLabFlag} compact />;
+          })}
+        </div>
+      )}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {!labs.length && <EmptyLabState />}
         {labs.map((lab) => {
           const running = runningFor(lab.slug);
           return (
-            <Card key={lab.slug} className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-bold">{lab.name}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">{lab.os} | {lab.category?.name ?? "Lab"} | {lab.timeLimitMinutes} minutes</p>
-                  {running?.expiresAt && <p className="mt-1 text-xs font-semibold text-primary">{timeLeftLabel(running.expiresAt)} | expires {shortDateTime(running.expiresAt)}</p>}
-                </div>
-                <Badge className="shrink-0" tone={running ? "teal" : "green"}>{running ? "Running" : "Available"}</Badge>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">{lab.description}</p>
-              {running && <LabSessionPanel lab={lab} attempt={running} flagBusy={flagSlug === lab.slug} onSubmitFlag={submitLabFlag} />}
-              <div className="mt-4 flex items-center justify-between gap-3">
-                <Badge tone={difficultyTone(lab.difficulty)}>{lab.difficulty}</Badge>
-                <Button variant={running ? "outline" : "primary"} size="sm" onClick={() => toggleLab(lab)} disabled={actionSlug === lab.slug}>
-                  {actionSlug === lab.slug ? "Working" : running ? "Stop Lab" : "Start Lab"}
-                </Button>
-              </div>
-            </Card>
+            <MachineCard
+              key={lab.slug}
+              lab={lab}
+              running={running}
+              actionBusy={actionSlug === lab.slug}
+              flagBusy={flagSlug === lab.slug}
+              onToggle={toggleLab}
+              onSubmitFlag={submitLabFlag}
+              mode="lab"
+            />
           );
         })}
       </div>
@@ -2036,11 +2031,13 @@ function LabSessionPanel({
   attempt,
   flagBusy,
   onSubmitFlag,
+  compact = false,
 }: {
   lab: Lab;
   attempt: LabAttempt;
   flagBusy: boolean;
   onSubmitFlag: (lab: Lab, flag: string) => Promise<LabFlagResult | null>;
+  compact?: boolean;
 }) {
   const [flag, setFlag] = useState("");
   const [result, setResult] = useState<LabFlagResult | null>(null);
@@ -2053,17 +2050,22 @@ function LabSessionPanel({
   }
 
   return (
-    <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+    <div className={cn("rounded-2xl border border-sky-200/80 bg-gradient-to-br from-sky-50 to-white p-4 shadow-sm dark:border-sky-500/20 dark:from-sky-950/35 dark:to-slate-950", !compact && "mt-4")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-extrabold text-primary">Target online</p>
-          <p className="mt-1 text-xs font-semibold text-muted-foreground">Started {shortDateTime(attempt.startedAt)} | {timeLeftLabel(attempt.expiresAt)}</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-lift">
+            <Terminal className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-extrabold text-primary">Target online</p>
+            <p className="mt-1 text-xs font-semibold text-muted-foreground">Started {shortDateTime(attempt.startedAt)} | {timeLeftLabel(attempt.expiresAt)}</p>
+          </div>
         </div>
         <Badge tone="teal">{target?.rewardXp ?? 180} XP</Badge>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-border bg-surface p-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-border/80 bg-white/80 p-3 dark:bg-slate-950/60">
           <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase text-muted-foreground">
             <ServerCog className="h-4 w-4" />
             Connection
@@ -2071,7 +2073,7 @@ function LabSessionPanel({
           <p className="break-all text-sm font-bold">{target?.url ?? `http://${attempt.ipAddress ?? "target.local"}`}</p>
           <p className="mt-1 text-xs text-muted-foreground">IP: {attempt.ipAddress ?? target?.address ?? "-"}</p>
         </div>
-        <div className="rounded-xl border border-border bg-surface p-3">
+        <div className="rounded-xl border border-border/80 bg-white/80 p-3 dark:bg-slate-950/60">
           <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase text-muted-foreground">
             <KeyRound className="h-4 w-4" />
             Credentials
@@ -2082,7 +2084,7 @@ function LabSessionPanel({
       </div>
 
       <p className="mt-4 text-sm leading-6 text-muted-foreground">{target?.objective ?? "Enumerate the machine and submit the proof flag."}</p>
-      <div className="mt-4 rounded-xl bg-slate-950 p-4 text-slate-100">
+      <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-4 text-slate-100 shadow-inner">
         <div className="mb-3 flex items-center gap-2 text-xs font-bold text-slate-400">
           <Terminal className="h-4 w-4" />
           Suggested checks
@@ -2092,11 +2094,11 @@ function LabSessionPanel({
 
       <div className="mt-4 grid gap-2">
         {(target?.clues ?? []).map((clue) => (
-          <p key={clue} className="rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-muted-foreground">{clue}</p>
+          <p key={clue} className="rounded-xl border border-border/80 bg-white/70 px-3 py-2 text-xs font-semibold leading-5 text-muted-foreground dark:bg-slate-950/50">{clue}</p>
         ))}
       </div>
 
-      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input value={flag} onChange={(event) => setFlag(event.target.value)} placeholder={target?.flagFormat ?? "TH{...}"} aria-label={`${lab.name} lab flag`} />
         <Button onClick={submit} disabled={!flag || flagBusy} className="sm:w-40">
           {flagBusy ? "Checking" : "Submit Flag"}
@@ -2108,6 +2110,74 @@ function LabSessionPanel({
         </p>
       )}
     </div>
+  );
+}
+
+function EmptyLabState() {
+  return (
+    <Card className="p-6">
+      <MonitorDot className="h-8 w-8 text-primary" />
+      <h3 className="mt-4 font-bold">No machines available</h3>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">Published lab machines will appear here from the backend catalog.</p>
+    </Card>
+  );
+}
+
+function MachineCard({
+  lab,
+  running,
+  actionBusy,
+  flagBusy,
+  onToggle,
+  onSubmitFlag,
+  mode = "machine",
+}: {
+  lab: Lab;
+  running?: LabAttempt;
+  actionBusy: boolean;
+  flagBusy: boolean;
+  onToggle: (lab: Lab) => void;
+  onSubmitFlag: (lab: Lab, flag: string) => Promise<LabFlagResult | null>;
+  mode?: "machine" | "lab";
+}) {
+  return (
+    <Card className={cn("group overflow-hidden p-0 hover:-translate-y-0.5 hover:shadow-soft", running && "border-primary/30 shadow-soft")}>
+      <div className={cn("h-1.5 bg-slate-200 dark:bg-slate-800", running && "bg-gradient-to-r from-primary to-accent")} />
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary", running && "bg-primary text-primary-foreground shadow-lift")}>
+            <MonitorDot className="h-5 w-5" />
+          </span>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Badge tone={running ? "teal" : "slate"}>{running ? "Running" : "Stopped"}</Badge>
+            <Badge tone={difficultyTone(lab.difficulty)}>{lab.difficulty}</Badge>
+          </div>
+        </div>
+
+        <div className="mt-5 min-w-0">
+          <p className="text-xs font-extrabold uppercase text-primary">{lab.category?.name ?? "Lab Machine"}</p>
+          <h2 className="mt-2 text-xl font-extrabold tracking-normal">{lab.name}</h2>
+          <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">{lab.description}</p>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded-xl border border-border bg-muted/35 p-3">
+            <p className="text-xs font-bold uppercase text-muted-foreground">OS</p>
+            <p className="mt-1 truncate font-extrabold">{lab.os}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-muted/35 p-3">
+            <p className="text-xs font-bold uppercase text-muted-foreground">Limit</p>
+            <p className="mt-1 font-extrabold">{lab.timeLimitMinutes}m</p>
+          </div>
+        </div>
+
+        {running && <LabSessionPanel lab={lab} attempt={running} flagBusy={flagBusy} onSubmitFlag={onSubmitFlag} />}
+
+        <Button className="mt-5 w-full" variant={running ? "outline" : "primary"} onClick={() => onToggle(lab)} disabled={actionBusy}>
+          {actionBusy ? "Working" : running ? `Stop ${mode === "lab" ? "Lab" : "Machine"}` : `Start ${mode === "lab" ? "Lab" : "Machine"}`}
+        </Button>
+      </div>
+    </Card>
   );
 }
 
@@ -2178,72 +2248,38 @@ function Machines({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
 
   return (
     <div className="space-y-6">
-      <Card className="p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <Badge tone={runningCount ? "teal" : "slate"}>{runningCount ? `${runningCount} running` : "All machines idle"}</Badge>
-            <h1 className="mt-3 text-3xl font-extrabold">Machines</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Start a lab machine, track the active runtime, and stop it when your session is done.</p>
+      <Card className="overflow-hidden p-0">
+        <div className="border-b border-border bg-gradient-to-br from-white via-sky-50 to-teal-50 p-6 dark:from-slate-950 dark:via-sky-950/40 dark:to-teal-950/20">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <Badge tone={runningCount ? "teal" : "slate"}>{runningCount ? `${runningCount} running` : "All machines idle"}</Badge>
+              <h1 className="mt-3 text-3xl font-extrabold tracking-normal">Machines</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Start a lab machine, inspect its target details, submit the proof flag, and stop the session when you are done.</p>
+            </div>
+            <Button variant="outline" onClick={loadAttempts} disabled={loading}>{loading ? "Refreshing" : "Refresh Sessions"}</Button>
           </div>
-          <Button variant="outline" onClick={loadAttempts} disabled={loading}>{loading ? "Refreshing" : "Refresh Sessions"}</Button>
         </div>
-        <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-border bg-muted/40 p-4">
-            <p className="text-xs font-bold uppercase text-muted-foreground">Catalog</p>
-            <p className="mt-2 text-2xl font-extrabold">{labs.length}</p>
-          </div>
-          <div className="rounded-xl border border-border bg-muted/40 p-4">
-            <p className="text-xs font-bold uppercase text-muted-foreground">Running</p>
-            <p className="mt-2 text-2xl font-extrabold text-primary">{runningCount}</p>
-          </div>
-          <div className="rounded-xl border border-border bg-muted/40 p-4">
-            <p className="text-xs font-bold uppercase text-muted-foreground">Available</p>
-            <p className="mt-2 text-2xl font-extrabold">{availableCount}</p>
-          </div>
+        <div className="grid gap-3 p-4 sm:grid-cols-3">
+          <MachineMetric label="Catalog" value={labs.length} detail="Published machines" />
+          <MachineMetric label="Running" value={runningCount} detail="Active sessions" highlight />
+          <MachineMetric label="Available" value={availableCount} detail="Ready to start" />
         </div>
       </Card>
       {message && <StatusPanel tone="info" message={message} />}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {!labs.length && (
-          <Card className="p-6">
-            <MonitorDot className="h-8 w-8 text-primary" />
-            <h3 className="mt-4 font-bold">No machines available</h3>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">Published lab machines will appear here from the backend catalog.</p>
-          </Card>
-        )}
+      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        {!labs.length && <EmptyLabState />}
         {labs.map((lab) => {
           const running = runningFor(lab.slug);
           return (
-            <Card key={lab.slug} className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-primary/10 text-primary">
-                  <MonitorDot className="h-5 w-5" />
-                </span>
-                <Badge tone={running ? "teal" : "slate"}>{running ? "Running" : "Stopped"}</Badge>
-              </div>
-              <h2 className="mt-4 text-lg font-bold">{lab.name}</h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{lab.description}</p>
-              <div className="mt-4 grid gap-2 text-sm font-semibold text-muted-foreground">
-                <div className="flex items-center justify-between gap-3">
-                  <span>Operating system</span>
-                  <span className="text-foreground">{lab.os}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>Session limit</span>
-                  <span className="text-foreground">{lab.timeLimitMinutes}m</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>Difficulty</span>
-                  <Badge tone={difficultyTone(lab.difficulty)}>{lab.difficulty}</Badge>
-                </div>
-              </div>
-              {running && (
-                <LabSessionPanel lab={lab} attempt={running} flagBusy={flagSlug === lab.slug} onSubmitFlag={submitLabFlag} />
-              )}
-              <Button className="mt-4 w-full" variant={running ? "outline" : "primary"} onClick={() => toggleLab(lab)} disabled={actionSlug === lab.slug}>
-                {actionSlug === lab.slug ? "Working" : running ? "Stop Machine" : "Start Machine"}
-              </Button>
-            </Card>
+            <MachineCard
+              key={lab.slug}
+              lab={lab}
+              running={running}
+              actionBusy={actionSlug === lab.slug}
+              flagBusy={flagSlug === lab.slug}
+              onToggle={toggleLab}
+              onSubmitFlag={submitLabFlag}
+            />
           );
         })}
       </div>
@@ -2251,13 +2287,30 @@ function Machines({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
   );
 }
 
+function MachineMetric({ label, value, detail, highlight = false }: { label: string; value: number; detail: string; highlight?: boolean }) {
+  return (
+    <div className={cn("rounded-xl border border-border bg-muted/35 p-4", highlight && "border-primary/25 bg-primary/5")}>
+      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
+      <p className={cn("mt-2 text-2xl font-extrabold", highlight && "text-primary")}>{value}</p>
+      <p className="mt-1 text-xs font-semibold text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
 function LabsView({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
   return (
     <div className="space-y-6">
-      <Card className="p-6">
-        <Badge tone="teal">Hands-on sessions</Badge>
-        <h1 className="mt-3 text-3xl font-extrabold">Labs</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Use labs to launch machines, practice skills, and keep track of active sessions from one place.</p>
+      <Card className="overflow-hidden p-0">
+        <div className="border-b border-border bg-gradient-to-br from-white via-teal-50 to-sky-50 p-6 dark:from-slate-950 dark:via-teal-950/30 dark:to-sky-950/30">
+          <Badge tone="teal">Hands-on sessions</Badge>
+          <h1 className="mt-3 text-3xl font-extrabold tracking-normal">Labs</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Launch machines, work through target notes, and submit proof flags from the active session panel.</p>
+        </div>
+        <div className="grid gap-3 p-4 sm:grid-cols-3">
+          <MachineMetric label="Labs" value={labs.length} detail="Available catalog" />
+          <MachineMetric label="Beginner" value={labs.filter((lab) => lab.difficulty === "BEGINNER" || lab.difficulty === "EASY").length} detail="Entry friendly" highlight />
+          <MachineMetric label="Advanced" value={labs.filter((lab) => lab.difficulty === "HARD" || lab.difficulty === "EXPERT").length} detail="Higher pressure" />
+        </div>
       </Card>
       <ActiveLabs auth={auth} labs={labs} />
     </div>
