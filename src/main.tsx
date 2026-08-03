@@ -1195,15 +1195,15 @@ function TrainHackLogo({ compact = false }: { compact?: boolean }) {
 
 function Sidebar({ view, setView }: { view: string; setView: (view: View) => void }) {
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 shrink-0 border-r border-border bg-surface px-4 py-5 lg:flex lg:flex-col">
-      <button onClick={() => setView("dashboard")} className="mb-7 flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-1 text-left transition-colors hover:bg-muted/60">
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 shrink-0 border-r border-border bg-surface px-4 py-4 lg:flex lg:flex-col">
+      <button onClick={() => setView("dashboard")} className="flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-1 text-left transition-colors hover:bg-muted/60">
         <TrainHackLogo compact />
         <span className="min-w-0">
           <span className="block truncate text-lg font-extrabold tracking-normal">TrainHack</span>
           <span className="block truncate text-xs font-medium text-muted-foreground">Security Academy</span>
         </span>
       </button>
-      <nav className="mt-8 grid gap-2 px-2" aria-label="Primary navigation">
+      <nav className="mt-5 grid gap-1 px-1" aria-label="Primary navigation">
         {navItems.map(([label, Icon, target]) => {
           const active = view === target;
           return (
@@ -1211,7 +1211,7 @@ function Sidebar({ view, setView }: { view: string; setView: (view: View) => voi
               key={label}
               onClick={() => setView(target)}
               className={cn(
-                "flex h-12 w-full items-center gap-3 rounded-xl px-3 text-sm font-bold text-muted-foreground transition-colors",
+                "flex h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-bold text-muted-foreground transition-colors",
                 active && "bg-primary/10 text-primary",
                 !active && "hover:bg-muted hover:text-foreground",
               )}
