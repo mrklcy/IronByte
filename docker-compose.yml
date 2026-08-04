@@ -28,6 +28,11 @@ services:
       context: ./backend
     env_file:
       - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://trainhack:trainhack@postgres:5432/trainhack?schema=public
+      REDIS_URL: redis://redis:6379
+      LAB_ORCHESTRATOR: docker
+      LAB_PUBLIC_HOST: localhost
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,6 +40,8 @@ services:
         condition: service_started
     ports:
       - "4000:4000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   nginx:
     image: nginx:1.27-alpine
@@ -44,6 +51,18 @@ services:
       - "8080:80"
     depends_on:
       - backend
+
+  lab-web-image:
+    image: trainhack/lab-web:local
+    build:
+      context: ./backend/lab-images/web
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/status | grep -q online"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles:
+      - lab-images
 
 volumes:
   postgres_data:

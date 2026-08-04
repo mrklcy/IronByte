@@ -11,7 +11,6 @@ import {
   FileCheck2,
   Flag,
   GraduationCap,
-  HardDrive,
   Home,
   KeyRound,
   Layers3,
@@ -42,7 +41,7 @@ const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:4000/api/v1";
 const demoCredentials = { email: "ari@trainhack.local", password: "TrainHack123!" };
 const adminCredentials = { email: "", password: "" };
 
-type View = "landing" | "dashboard" | "challenge" | "path" | "machines" | "labs" | "leaderboard" | "certificates" | "community" | "profile" | "settings" | "login" | "signup" | "admin-auth";
+type View = "landing" | "dashboard" | "challenge" | "path" | "machines" | "leaderboard" | "certificates" | "community" | "profile" | "settings" | "login" | "signup" | "admin-auth";
 type AdminView = "operations" | "users" | "content" | "machines" | "audit";
 type AuthMode = "login" | "register";
 type Difficulty = "BEGINNER" | "EASY" | "MEDIUM" | "HARD" | "EXPERT";
@@ -79,6 +78,7 @@ type Challenge = {
   tags: string[];
   category?: { name: string };
   hints?: { id: string; title: string; penaltyPct: number; content?: string }[];
+  files?: { id: string; fileName: string; fileUrl: string; checksum?: string | null; sizeBytes?: number | null }[];
 };
 
 type Course = {
@@ -211,8 +211,7 @@ const navItems = [
   ["Dashboard", Home, "dashboard"],
   ["Challenges", Flag, "challenge"],
   ["Learning Paths", Layers3, "path"],
-  ["Machines", MonitorDot, "machines"],
-  ["Labs", HardDrive, "labs"],
+  ["Machines & Labs", MonitorDot, "machines"],
   ["Leaderboard", Trophy, "leaderboard"],
   ["Certificates", Award, "certificates"],
   ["Community", Users, "community"],
@@ -680,7 +679,6 @@ function App() {
               {appView === "challenge" && <ChallengesView auth={auth} setAuth={setAuth} challenges={data.challenges} selectedChallenge={challenge} openChallenge={openChallenge} />}
               {appView === "path" && <LearningPath auth={auth} courses={data.courses} />}
               {appView === "machines" && <Machines auth={auth} labs={data.labs} />}
-              {appView === "labs" && <LabsView auth={auth} labs={data.labs} />}
               {appView === "leaderboard" && <LeaderboardView leaders={data.leaderboard} auth={auth} />}
               {appView === "certificates" && <CertificatesView auth={auth} data={data} />}
               {appView === "community" && <CommunityView auth={auth} />}
@@ -830,7 +828,7 @@ function LandingPage({
               TrainHack is a hands-on cybersecurity academy for learning by solving.
             </h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-muted-foreground">
-              Build real security skill through guided learning paths, challenge libraries, live machines, classroom workflows, and event-style practice.
+              Build real security skill through guided learning paths, challenge libraries, live machine sessions, classroom workflows, and event-style practice.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button onClick={() => onAuth("register")}>
@@ -1048,7 +1046,7 @@ function LandingPage({
               <p className="text-xs font-extrabold uppercase text-primary">Classroom</p>
               <h2 className="mt-3 text-3xl font-extrabold">Teach cybersecurity with trackable practice.</h2>
               <p className="mt-3 leading-7 text-muted-foreground">
-                TrainHack supports a classroom-style workflow where instructors can guide learners through paths, labs, and challenge milestones.
+                TrainHack supports a classroom-style workflow where instructors can guide learners through paths, machine sessions, and challenge milestones.
               </p>
             </motion.div>
             <div className="grid gap-4 md:grid-cols-3">
@@ -1265,7 +1263,7 @@ function Topbar({
         </button>
         <div className="relative order-2 w-full min-w-0 sm:order-none sm:max-w-sm lg:max-w-md lg:mr-auto">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input ref={searchRef} className="pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search challenges, labs, paths..." aria-label="Search" />
+          <Input ref={searchRef} className="pl-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search challenges, machines, paths..." aria-label="Search" />
         </div>
         <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={() => searchRef.current?.focus()}>
           <Command className="h-4 w-4" />
@@ -1324,7 +1322,7 @@ function Dashboard({ auth, data, openChallenge, setView }: { auth: AuthState; da
               </h1>
               <p className="mt-3 max-w-2xl text-base leading-7 text-muted-foreground">
               {hasPersonalProgress
-                ? "Continue your current path, inspect live labs, and keep turning solved challenges into measurable XP."
+                ? "Continue your current path, inspect live machines, and keep turning solved challenges into measurable XP."
                 : "Start with guided paths, practice in machines, and solve challenges at your own pace. Your personal progress is empty until you complete real work."}
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
@@ -1381,7 +1379,7 @@ function Dashboard({ auth, data, openChallenge, setView }: { auth: AuthState; da
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2 2xl:grid-cols-[1fr_0.75fr_0.75fr]">
-        <ActiveLabs auth={auth} labs={data.labs} dashboard onBrowse={() => setView("labs")} />
+        <ActiveLabs auth={auth} labs={data.labs} dashboard onBrowse={() => setView("machines")} />
         <Leaderboard leaders={data.leaderboard} />
         <ActivityFeed />
       </div>
@@ -2045,7 +2043,7 @@ function ActiveLabs({ auth, labs, dashboard = false, onBrowse }: { auth: AuthSta
   return (
     <section>
       <SectionHeader
-        title="Active Labs"
+        title={dashboard ? "Machine Sessions" : "Machine Catalog"}
         action={<Button variant="outline" size="sm" onClick={loadAttempts} disabled={loading}>{loading ? "Refreshing" : "Refresh"}</Button>}
       />
       {message && <StatusPanel tone="info" message={message} />}
@@ -2070,14 +2068,14 @@ function ActiveLabs({ auth, labs, dashboard = false, onBrowse }: { auth: AuthSta
               flagBusy={flagSlug === lab.slug}
               onToggle={toggleLab}
               onSubmitFlag={submitLabFlag}
-              mode="lab"
+              mode="machine"
             />
           );
         })}
         {dashboard && labs.length > visibleLabs.length && (
           <Card className="p-4">
             <Button className="w-full" variant="outline" size="sm" onClick={onBrowse}>
-              Showing {visibleLabs.length} of {labs.length} labs
+              Showing {visibleLabs.length} of {labs.length} machines
             </Button>
           </Card>
         )}
@@ -2313,14 +2311,14 @@ function Machines({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <Badge tone={runningCount ? "teal" : "slate"}>{runningCount ? `${runningCount} running` : "All machines idle"}</Badge>
-              <h1 className="mt-3 text-3xl font-extrabold tracking-normal">Machines</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Start a lab machine, inspect its target details, submit the proof flag, and stop the session when you are done.</p>
+              <h1 className="mt-3 text-3xl font-extrabold tracking-normal">Machines & Labs</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Machines and labs are one workflow here: start a machine session, inspect the target details, submit the proof flag, and the platform records the completed lab.</p>
             </div>
             <Button variant="outline" onClick={loadAttempts} disabled={loading}>{loading ? "Refreshing" : "Refresh Sessions"}</Button>
           </div>
         </div>
         <div className="grid gap-3 p-4 sm:grid-cols-3">
-          <MachineMetric label="Catalog" value={labs.length} detail="Published machines" />
+          <MachineMetric label="Catalog" value={labs.length} detail="Published machine labs" />
           <MachineMetric label="Running" value={runningCount} detail="Active sessions" highlight />
           <MachineMetric label="Available" value={availableCount} detail="Ready to start" />
         </div>
@@ -2353,26 +2351,6 @@ function MachineMetric({ label, value, detail, highlight = false }: { label: str
       <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
       <p className={cn("mt-2 text-2xl font-extrabold", highlight && "text-primary")}>{value}</p>
       <p className="mt-1 text-xs font-semibold text-muted-foreground">{detail}</p>
-    </div>
-  );
-}
-
-function LabsView({ auth, labs }: { auth: AuthState; labs: Lab[] }) {
-  return (
-    <div className="space-y-6">
-      <Card className="overflow-hidden p-0">
-        <div className="border-b border-border bg-gradient-to-br from-white via-teal-50 to-sky-50 p-6 dark:from-slate-950 dark:via-teal-950/30 dark:to-sky-950/30">
-          <Badge tone="teal">Hands-on sessions</Badge>
-          <h1 className="mt-3 text-3xl font-extrabold tracking-normal">Labs</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Launch machines, work through target notes, and submit proof flags from the active session panel.</p>
-        </div>
-        <div className="grid gap-3 p-4 sm:grid-cols-3">
-          <MachineMetric label="Labs" value={labs.length} detail="Available catalog" />
-          <MachineMetric label="Beginner" value={labs.filter((lab) => lab.difficulty === "BEGINNER" || lab.difficulty === "EASY").length} detail="Entry friendly" highlight />
-          <MachineMetric label="Advanced" value={labs.filter((lab) => lab.difficulty === "HARD" || lab.difficulty === "EXPERT").length} detail="Higher pressure" />
-        </div>
-      </Card>
-      <ActiveLabs auth={auth} labs={labs} />
     </div>
   );
 }
@@ -3070,12 +3048,18 @@ function ChallengeDetail({
     setSubmitting(true);
     setMessage("");
     try {
-      const payload = await api<{ correct: boolean; awardedXp: number }>(`/challenges/${challenge.slug}/submissions`, {
+      const payload = await api<{ correct: boolean; awardedXp: number; alreadySolved?: boolean }>(`/challenges/${challenge.slug}/submissions`, {
         method: "POST",
         token: auth.accessToken,
         body: JSON.stringify({ flag }),
       });
-      setMessage(payload.data.correct ? `Correct flag. Awarded ${payload.data.awardedXp} XP.` : "Incorrect flag. Try again.");
+      setMessage(
+        payload.data.correct
+          ? payload.data.alreadySolved
+            ? "Correct flag. This challenge was already solved."
+            : `Correct flag. Awarded ${payload.data.awardedXp} XP.`
+          : "Incorrect flag. Try again.",
+      );
       if (payload.data.correct && auth.user) setAuth({ ...auth, user: { ...auth.user, xp: auth.user.xp + payload.data.awardedXp } });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Flag submission failed.");
@@ -3085,6 +3069,7 @@ function ChallengeDetail({
   }
 
   if (!challenge) return <StatusPanel tone="info" message="No challenge is published yet." />;
+  const playbook = challengePlaybook(challenge);
 
   return (
     <Card className={cn("overflow-hidden", modal ? "max-h-[88vh] overflow-y-auto p-5 sm:p-6 lg:p-8" : "p-6 lg:p-8")}>
@@ -3098,24 +3083,41 @@ function ChallengeDetail({
           <h1 id="challenge-modal-title" className="mt-4 break-words pr-12 text-2xl font-extrabold sm:text-3xl">{challenge.title}</h1>
           <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">{challenge.description}</p>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            {["Find the exposed route", "Identify the trusted header", "Submit the recovered flag", "Document the bypass"].map((item) => (
-              <div key={item} className="flex min-h-16 items-center gap-3 rounded-xl border border-border bg-muted/35 p-4">
-                <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
-                <span className="text-sm font-semibold">{item}</span>
+          <div className="mt-6 rounded-2xl border border-border bg-muted/35 p-5">
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                <Search className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="font-bold">Start Here</h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">{playbook.start}</p>
               </div>
-            ))}
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {playbook.steps.map((item) => (
+                <div key={item} className="flex min-h-14 items-center gap-3 rounded-xl border border-border bg-surface p-3">
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
+                  <span className="text-sm font-semibold">{item}</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 rounded-xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm font-semibold text-primary">{playbook.flagRule}</p>
           </div>
 
-          <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950 p-5 text-slate-100">
-            <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
-              <Terminal className="h-4 w-4" />
-              request.log
-            </div>
-            <pre className="overflow-x-auto text-sm leading-7"><code>{`GET /admin HTTP/1.1
-Host: lab.trainhack.local
-X-Forwarded-For: 127.0.0.1
-X-TrainHack-Trace: enabled`}</code></pre>
+          <div className="mt-6 space-y-4">
+            <h2 className="font-bold">Evidence To Inspect</h2>
+            {(challenge.files?.length ? challenge.files : fallbackChallengeFiles(challenge)).map((file) => (
+              <div key={file.id} className="rounded-2xl border border-slate-800 bg-slate-950 p-5 text-slate-100">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+                  <span className="flex items-center gap-2">
+                    <Terminal className="h-4 w-4" />
+                    {file.fileName}
+                  </span>
+                  {file.sizeBytes ? <span>{file.sizeBytes} bytes</span> : null}
+                </div>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-sm leading-7"><code>{challengeFileText(file.fileUrl)}</code></pre>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -3144,6 +3146,91 @@ X-TrainHack-Trace: enabled`}</code></pre>
       </div>
     </Card>
   );
+}
+
+function challengePlaybook(challenge: Challenge) {
+  const common = {
+    start: "Begin with the evidence file below. Read it line by line, then compare anything unusual against the challenge description and hints.",
+    steps: ["Open the evidence file", "Mark unusual values", "Match the clue to the vulnerability", "Submit the TH{...} proof"],
+    flagRule: "The answer is always the complete TH{...} proof string recovered from the evidence.",
+  };
+
+  const bySlug: Record<string, typeof common> = {
+    "header-mirage": {
+      start: "Start in request.log. The challenge is about a proxy trust boundary, so inspect the route, forwarded headers, and the note about who the app trusted.",
+      steps: ["Read request.log", "Find the internal route", "Identify the client-controlled header", "Recover the incident proof"],
+      flagRule: "Submit the full incident proof value that starts with TH{ and ends with }.",
+    },
+    "cookie-cabinet": {
+      start: "Start in session-review.txt. Compare the cookie attributes with what a secure role/session cookie should have.",
+      steps: ["Inspect Set-Cookie lines", "Find the unsigned role value", "Confirm the vault behavior", "Submit the recovered flag"],
+      flagRule: "Submit the recovered flag shown by the session review.",
+    },
+    "nonce-repeat": {
+      start: "Start in crypto-notes.txt. Look for the reused nonce and the recovered plaintext note.",
+      steps: ["Find the repeated nonce", "Use the known plaintext clue", "Read the recovered operator note", "Submit the TH{...} value"],
+      flagRule: "Submit the recovered operator note flag.",
+    },
+    "midnight-pcap": {
+      start: "Start in dns-export.txt. Decode the suspicious DNS labels and follow the analyst note.",
+      steps: ["Inspect repeated DNS labels", "Decode the encoded fragments", "Read the analyst note", "Submit the proof trail"],
+      flagRule: "Submit the TH{...} value referenced by the decoded DNS trail.",
+    },
+    "sudo-shadow": {
+      start: "Start in sudo-l.txt. Read the allowed command and look for an argument pattern that changes command behavior.",
+      steps: ["Review allowed sudo command", "Find risky wildcard handling", "Follow the checkpoint-action note", "Submit the controlled proof"],
+      flagRule: "Submit the controlled proof printed by the sudo review.",
+    },
+    "bucket-signal": {
+      start: "Start in bucket-metadata.json. Inspect public exposure and custom metadata fields.",
+      steps: ["Read bucket visibility", "Inspect metadata keys", "Find the training proof field", "Submit the metadata flag"],
+      flagRule: "Submit the TH{...} value stored in the metadata.",
+    },
+    "signal-trace": {
+      start: "Start in trace.txt. Follow the comparison and branch notes like a small reverse-engineering trace.",
+      steps: ["Read the branch trace", "Find the target string", "Confirm the accepted format", "Submit the branch proof"],
+      flagRule: "Submit the operator branch target string.",
+    },
+    "stack-postcard": {
+      start: "Start in crash-notes.txt. Use the offset and target function note to understand what the exploit printed.",
+      steps: ["Read the crash offset", "Find the safe target function", "Read the printed proof", "Submit the control-flow flag"],
+      flagRule: "Submit the proof printed after controlled redirection.",
+    },
+    "vault-reentry": {
+      start: "Start in contract-review.sol. Compare the order of external calls and balance updates.",
+      steps: ["Read withdraw()", "Find the external call", "Check when balance changes", "Submit the review proof"],
+      flagRule: "Submit the proof comment from the contract review.",
+    },
+    "route-drift": {
+      start: "Start in routes.txt. Compare each host's default gateway and TTL to find the one that does not match the baseline.",
+      steps: ["Compare route rows", "Find the drifting gateway", "Read the proof trail", "Submit the route flag"],
+      flagRule: "Submit the TH{...} proof trail from the route evidence.",
+    },
+    "prompt-guard": {
+      start: "Start in retrieval-context.md. Separate retrieved data from actual system instructions.",
+      steps: ["Read retrieved content", "Find instruction injection", "Identify the boundary failure", "Submit the boundary proof"],
+      flagRule: "Submit the boundary proof value from the evaluation note.",
+    },
+  };
+
+  return bySlug[challenge.slug] ?? common;
+}
+
+function challengeFileText(fileUrl: string) {
+  if (!fileUrl.startsWith("data:text/plain,")) return fileUrl;
+  return decodeURIComponent(fileUrl.slice("data:text/plain,".length));
+}
+
+function fallbackChallengeFiles(challenge: Challenge) {
+  return [
+    {
+      id: `${challenge.slug}:brief`,
+      fileName: "brief.txt",
+      fileUrl: `data:text/plain,${encodeURIComponent(`${challenge.title}\n\nInspect the scenario notes, use the hints only when stuck, and submit a flag in TH{...} format.`)}`,
+      sizeBytes: null,
+      checksum: null,
+    },
+  ];
 }
 
 function AuthCard({

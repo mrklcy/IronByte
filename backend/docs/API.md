@@ -38,6 +38,10 @@ Protected endpoints use `Authorization: Bearer <accessToken>`.
 ## Labs
 
 - `GET /labs`
+- `GET /lab-attempts` requires authentication
+- `POST /labs/:slug/start` requires `labs:use`; starts a Docker-backed lab target when `LAB_ORCHESTRATOR=docker`
+- `POST /lab-attempts/:id/stop` requires authentication; stops the lab target
+- `POST /labs/:slug/flag` requires `labs:use`
 
 ## CTF
 

@@ -48,7 +48,11 @@ export class ContentRepository {
         where,
         skip: params.skip,
         take: params.take,
-        include: { category: true, hints: { select: { id: true, title: true, penaltyPct: true } } },
+        include: {
+          category: true,
+          hints: { select: { id: true, title: true, penaltyPct: true } },
+          files: { orderBy: { createdAt: "asc" } },
+        },
       }),
     ]);
   }
@@ -56,7 +60,7 @@ export class ContentRepository {
   getChallenge(slug: string) {
     return prisma.challenge.findUnique({
       where: { slug },
-      include: { category: true, hints: true },
+      include: { category: true, hints: true, files: { orderBy: { createdAt: "asc" } } },
     });
   }
 
@@ -69,6 +73,13 @@ export class ContentRepository {
     awardedXp: number;
   }) {
     return prisma.flagSubmission.create({ data: input });
+  }
+
+  correctFlagSubmission(challengeId: string, userId: string) {
+    return prisma.flagSubmission.findFirst({
+      where: { challengeId, userId, status: SubmissionStatus.CORRECT },
+      orderBy: { createdAt: "asc" },
+    });
   }
 
   awardXp(userId: string, xp: number) {
@@ -116,6 +127,13 @@ export class ContentRepository {
     });
   }
 
+  expiredRunningLabAttempts(userId: string) {
+    return prisma.labAttempt.findMany({
+      where: { userId, status: LabStatus.RUNNING, expiresAt: { lte: new Date() } },
+      include: { lab: { include: { category: true } } },
+    });
+  }
+
   getLab(slug: string) {
     return prisma.lab.findUnique({
       where: { slug },
@@ -131,7 +149,7 @@ export class ContentRepository {
     });
   }
 
-  async startLab(slug: string, userId: string, ipAddress: string) {
+  async startLab(slug: string, userId: string) {
     const lab = await prisma.lab.findUnique({ where: { slug } });
     if (!lab || lab.status !== ContentStatus.PUBLISHED) return null;
     const now = new Date();
@@ -146,10 +164,27 @@ export class ContentRepository {
         userId,
         labId: lab.id,
         status: LabStatus.RUNNING,
-        ipAddress,
         startedAt: now,
         expiresAt: new Date(now.getTime() + lab.timeLimitMinutes * 60 * 1000),
       },
+      include: { lab: { include: { category: true } } },
+    });
+  }
+
+  updateLabAttemptTarget(
+    id: string,
+    userId: string,
+    target: {
+      ipAddress: string;
+      accessUrl: string;
+      provider: string;
+      providerInstanceId?: string;
+      targetMetadata?: Prisma.InputJsonValue;
+    },
+  ) {
+    return prisma.labAttempt.update({
+      where: { id },
+      data: target,
       include: { lab: { include: { category: true } } },
     });
   }

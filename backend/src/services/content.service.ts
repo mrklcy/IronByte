@@ -1,6 +1,7 @@
-import { SubmissionStatus } from "@prisma/client";
+import { Prisma, SubmissionStatus } from "@prisma/client";
 import { AppError } from "../exceptions/app-error.js";
 import { ContentRepository } from "../repositories/content.repository.js";
+import { LabOrchestrator } from "./lab-orchestrator.service.js";
 import { sha256 } from "../utils/crypto.js";
 
 const labXpByDifficulty = {
@@ -12,7 +13,10 @@ const labXpByDifficulty = {
 } as const;
 
 export class ContentService {
-  constructor(private readonly content = new ContentRepository()) {}
+  constructor(
+    private readonly content = new ContentRepository(),
+    private readonly labs = new LabOrchestrator(),
+  ) {}
 
   async listCourses(page: number, pageSize: number, search?: string) {
     return this.content.listCourses({ skip: (page - 1) * pageSize, take: pageSize, search });
@@ -44,7 +48,8 @@ export class ContentService {
     if (!challenge) throw new AppError("Challenge not found.", 404, "CHALLENGE_NOT_FOUND");
 
     const correct = sha256(flag.trim()) === challenge.flagHash;
-    const awardedXp = correct ? challenge.baseXp : 0;
+    const existingCorrect = correct ? await this.content.correctFlagSubmission(challenge.id, userId) : null;
+    const awardedXp = correct && !existingCorrect ? challenge.baseXp : 0;
 
     const submission = await this.content.createFlagSubmission({
       challengeId: challenge.id,
@@ -55,12 +60,13 @@ export class ContentService {
       awardedXp,
     });
 
-    if (correct) await this.content.awardXp(userId, awardedXp);
+    if (awardedXp > 0) await this.content.awardXp(userId, awardedXp);
 
     return {
       correct,
       awardedXp,
       submissionId: submission.id,
+      alreadySolved: !!existingCorrect,
     };
   }
 
@@ -79,6 +85,8 @@ export class ContentService {
   }
 
   async activeLabAttempts(userId: string) {
+    const expired = await this.content.expiredRunningLabAttempts(userId);
+    await Promise.all(expired.map((attempt) => this.labs.stop(attempt.provider, attempt.providerInstanceId)));
     const attempts = await this.content.activeLabAttempts(userId);
     return attempts.map((attempt) => this.withLabTarget(attempt));
   }
@@ -86,14 +94,33 @@ export class ContentService {
   async startLab(slug: string, userId: string) {
     const lab = await this.content.getLab(slug);
     if (!lab) throw new AppError("Lab not found.", 404, "LAB_NOT_FOUND");
-    const attempt = await this.content.startLab(slug, userId, this.labAddress(slug));
+
+    const running = await this.content.activeAttemptForLab(userId, lab.id);
+    if (running) await this.stopLabAttempt(running.id, userId);
+
+    const attempt = await this.content.startLab(slug, userId);
     if (!attempt) throw new AppError("Lab not found.", 404, "LAB_NOT_FOUND");
-    return this.withLabTarget(attempt);
+
+    try {
+      const target = await this.labs.start(lab, attempt.id);
+      const updated = await this.content.updateLabAttemptTarget(attempt.id, userId, {
+        ipAddress: target.ipAddress,
+        accessUrl: target.accessUrl,
+        provider: target.provider,
+        providerInstanceId: target.providerInstanceId,
+        targetMetadata: target.metadata as Prisma.InputJsonValue,
+      });
+      return this.withLabTarget(updated);
+    } catch (error) {
+      await this.content.stopLabAttempt(attempt.id, userId).catch(() => undefined);
+      throw error;
+    }
   }
 
   async stopLabAttempt(id: string, userId: string) {
     const attempt = await this.content.stopLabAttempt(id, userId);
     if (!attempt) throw new AppError("Lab attempt not found.", 404, "LAB_ATTEMPT_NOT_FOUND");
+    await this.labs.stop(attempt.provider, attempt.providerInstanceId);
     return this.withLabTarget(attempt);
   }
 
@@ -104,11 +131,12 @@ export class ContentService {
     const attempt = await this.content.activeAttemptForLab(userId, lab.id);
     if (!attempt) throw new AppError("Start this machine before submitting a lab flag.", 409, "LAB_NOT_RUNNING");
 
-    const correct = flag.trim() === this.labFlag(slug);
+    const correct = flag.trim() === this.labs.flagFor(slug);
     if (!correct) return { correct, awardedXp: 0, completed: false, expectedFormat: "TH{...}" };
 
     const awardedXp = labXpByDifficulty[lab.difficulty];
     const result = await this.content.completeLab(userId, lab.id, awardedXp, attempt.id);
+    await this.labs.stop(attempt.provider, attempt.providerInstanceId);
     return {
       correct,
       awardedXp: result.firstCompletion ? awardedXp : 0,
@@ -141,37 +169,35 @@ export class ContentService {
     return this.content.updateUserSettings(userId, input);
   }
 
-  private labAddress(slug: string) {
-    const digest = sha256(slug);
-    const third = 10 + (parseInt(digest.slice(0, 2), 16) % 120);
-    const fourth = 10 + (parseInt(digest.slice(2, 4), 16) % 200);
-    return `10.10.${third}.${fourth}`;
-  }
-
-  private labFlag(slug: string) {
-    return `TH{${slug.replace(/-/g, "_")}_owned}`;
-  }
-
-  private withLabTarget<T extends { ipAddress?: string | null; lab: { slug: string; name: string; os: string; difficulty: keyof typeof labXpByDifficulty } }>(attempt: T) {
-    const address = attempt.ipAddress ?? this.labAddress(attempt.lab.slug);
+  private withLabTarget<T extends { ipAddress?: string | null; accessUrl?: string | null; provider?: string | null; targetMetadata?: unknown; lab: { slug: string; name: string; os: string; difficulty: keyof typeof labXpByDifficulty } }>(attempt: T) {
+    const address = attempt.ipAddress ?? "pending";
+    const metadata = isRecord(attempt.targetMetadata) ? attempt.targetMetadata : {};
+    const username = typeof metadata.username === "string" ? metadata.username : "learner";
+    const password = typeof metadata.password === "string" ? metadata.password : `trainhack-${attempt.lab.slug}`;
     return {
       ...attempt,
       ipAddress: address,
       target: {
         address,
-        url: `http://${address}`,
-        username: "learner",
-        password: `trainhack-${attempt.lab.slug}`,
+        url: attempt.accessUrl ?? `http://${address}`,
+        username,
+        password,
         flagFormat: "TH{...}",
         objective: `Enumerate ${attempt.lab.name}, validate the finding, and submit the proof flag.`,
         rewardXp: labXpByDifficulty[attempt.lab.difficulty],
-        commands: [`ping ${address}`, `nmap -sV ${address}`, `curl http://${address}/status`],
+        commands: [`curl ${attempt.accessUrl ?? `http://${address}`}/status`, `curl ${attempt.accessUrl ?? `http://${address}`}/robots.txt`],
         clues: [
           `The training flag for this lab follows TH{${attempt.lab.slug.replace(/-/g, "_")}_...}.`,
           "Use the service notes and exposed metadata first; the flag is the final proof, not the first thing to guess.",
-          "For this local simulation, completing the machine requires the lab proof flag shown by the training pattern.",
+          attempt.provider === "docker"
+            ? "This machine is running in an isolated Docker container for the active attempt."
+            : "This local environment is using the simulation lab provider.",
         ],
       },
     };
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }

@@ -15,6 +15,10 @@ const envSchema = z.object({
   EMAIL_VERIFICATION_TTL_HOURS: z.coerce.number().int().positive().default(24),
   COOKIE_SECURE: z.coerce.boolean().default(false),
   LOG_LEVEL: z.string().default("info"),
+  LAB_ORCHESTRATOR: z.enum(["docker", "simulation"]).default("simulation"),
+  LAB_DOCKER_IMAGE: z.string().default("trainhack/lab-web:local"),
+  LAB_DOCKER_NETWORK: z.string().optional(),
+  LAB_PUBLIC_HOST: z.string().default("localhost"),
 });
 
 export const env = envSchema.parse(process.env);

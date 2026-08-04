@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -327,6 +328,8 @@ model Lab {
   description      String
   difficulty       Difficulty
   timeLimitMinutes Int
+  dockerImage      String?
+  servicePort      Int           @default(80)
   status           ContentStatus @default(DRAFT)
   category         LabCategory   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   attempts         LabAttempt[]
@@ -344,6 +347,10 @@ model LabAttempt {
   labId     String
   status    LabStatus @default(STOPPED)
   ipAddress String?
+  accessUrl String?
+  provider  String?
+  providerInstanceId String?
+  targetMetadata Json?
   startedAt DateTime?
   stoppedAt DateTime?
   expiresAt DateTime?
@@ -354,6 +361,7 @@ model LabAttempt {
 
   @@index([userId, status])
   @@index([labId])
+  @@index([providerInstanceId])
 }
 
 model LabProgress {
