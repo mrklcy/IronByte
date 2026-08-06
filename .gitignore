@@ -58,3 +58,7 @@ Desktop.ini
 .vscode/
 *.swp
 *.swo
+
+# Audit script and logs
+ironbyte-audit.bat
+audit-logs/

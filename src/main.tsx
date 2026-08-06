@@ -193,6 +193,7 @@ type ProfileAnalytics = {
   xpFromSolved: number;
   byCategory: Record<string, number>;
   byDifficulty: Record<string, number>;
+  solvedSlugs: string[];
   recentSolved: {
     slug: string;
     title: string;
@@ -460,7 +461,7 @@ function App() {
     let active = true;
     setLoading(true);
     Promise.all([
-      api<Challenge[]>(`/challenges?search=${encodeURIComponent(search)}`),
+      api<Challenge[]>(`/challenges?pageSize=100&search=${encodeURIComponent(search)}`),
       api<Course[]>(`/courses?search=${encodeURIComponent(search)}`),
       api<Lab[]>(`/labs?search=${encodeURIComponent(search)}`),
       api<User[]>("/leaderboard"),
@@ -2902,10 +2903,25 @@ function ChallengesView({
   const [category, setCategory] = useState<(typeof challengeCategories)[number]>("All");
   const [difficulty, setDifficulty] = useState<ChallengeDifficultyFilter>("All");
   const [modalChallenge, setModalChallenge] = useState<Challenge | null>(null);
+  const [hideSolved, setHideSolved] = useState(false);
+  const [solvedSlugs, setSolvedSlugs] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!auth.accessToken) {
+      setSolvedSlugs(new Set());
+      setHideSolved(false);
+      return;
+    }
+    api<ProfileAnalytics>("/users/me/analytics", { token: auth.accessToken })
+      .then((payload) => setSolvedSlugs(new Set(payload.data.solvedSlugs ?? [])))
+      .catch(() => setSolvedSlugs(new Set()));
+  }, [auth.accessToken]);
+
   const filtered = challenges.filter((challenge) => {
     const matchesCategory = category === "All" || challenge.category?.name === category;
     const matchesDifficulty = difficulty === "All" || challenge.difficulty === difficulty;
-    return matchesCategory && matchesDifficulty;
+    const matchesSolved = !hideSolved || !solvedSlugs.has(challenge.slug);
+    return matchesCategory && matchesDifficulty && matchesSolved;
   });
 
   function openChallengeModal(challenge: Challenge) {
@@ -2951,6 +2967,26 @@ function ChallengesView({
             </button>
           ))}
         </div>
+        {auth.accessToken && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/35 px-4 py-3">
+            <div>
+              <p className="text-sm font-bold">Solved visibility</p>
+              <p className="mt-1 text-xs font-semibold text-muted-foreground">{solvedSlugs.size} solved challenge{solvedSlugs.size === 1 ? "" : "s"} tracked for this account.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHideSolved((current) => !current)}
+              className={cn(
+                "inline-flex h-10 items-center gap-2 rounded-full border border-border px-4 text-sm font-bold transition-colors",
+                hideSolved ? "border-primary bg-primary text-primary-foreground" : "bg-surface text-muted-foreground hover:text-foreground",
+              )}
+              aria-pressed={hideSolved}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {hideSolved ? "Showing Unsolved" : "Hide Solved"}
+            </button>
+          </div>
+        )}
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -3125,7 +3161,7 @@ function ChallengeDetail({
           <AuthCard auth={auth} setAuth={setAuth} />
           <Card className="p-5">
             <h2 className="font-bold">Submit Flag</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">Enter the captured flag for this challenge.</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">Enter the flag you derived from the evidence.</p>
             <Input className="mt-4" value={flag} onChange={(event) => setFlag(event.target.value)} placeholder="TH{...}" aria-label="Flag submission" />
             <Button className="mt-3 w-full" disabled={!auth.accessToken || !flag || submitting} onClick={submitFlag}>
               {submitting ? "Submitting..." : "Submit Flag"}
@@ -3152,64 +3188,64 @@ function challengePlaybook(challenge: Challenge) {
   const common = {
     start: "Begin with the evidence file below. Read it line by line, then compare anything unusual against the challenge description and hints.",
     steps: ["Open the evidence file", "Mark unusual values", "Match the clue to the vulnerability", "Submit the TH{...} proof"],
-    flagRule: "The answer is always the complete TH{...} proof string recovered from the evidence.",
+    flagRule: "Build the final answer as a complete TH{...} proof string from the evidence.",
   };
 
   const bySlug: Record<string, typeof common> = {
     "header-mirage": {
       start: "Start in request.log. The challenge is about a proxy trust boundary, so inspect the route, forwarded headers, and the note about who the app trusted.",
-      steps: ["Read request.log", "Find the internal route", "Identify the client-controlled header", "Recover the incident proof"],
-      flagRule: "Submit the full incident proof value that starts with TH{ and ends with }.",
+      steps: ["Read request.log", "Find the internal route", "Identify the client-controlled header", "Build the incident proof"],
+      flagRule: "Use the proof recipe and normalized finding phrase to build the TH{...} answer.",
     },
     "cookie-cabinet": {
       start: "Start in session-review.txt. Compare the cookie attributes with what a secure role/session cookie should have.",
-      steps: ["Inspect Set-Cookie lines", "Find the unsigned role value", "Confirm the vault behavior", "Submit the recovered flag"],
-      flagRule: "Submit the recovered flag shown by the session review.",
+      steps: ["Inspect Set-Cookie lines", "Find the unsigned role value", "Confirm the vault behavior", "Build the proof"],
+      flagRule: "Use the proof recipe and normalized remediation phrase to build the TH{...} answer.",
     },
     "nonce-repeat": {
       start: "Start in crypto-notes.txt. Look for the reused nonce and the recovered plaintext note.",
-      steps: ["Find the repeated nonce", "Use the known plaintext clue", "Read the recovered operator note", "Submit the TH{...} value"],
-      flagRule: "Submit the recovered operator note flag.",
+      steps: ["Find the repeated nonce", "Use the known plaintext clue", "Read the recovered operator note", "Normalize the proof phrase"],
+      flagRule: "Wrap the normalized operator note with TH{...}.",
     },
     "midnight-pcap": {
       start: "Start in dns-export.txt. Decode the suspicious DNS labels and follow the analyst note.",
       steps: ["Inspect repeated DNS labels", "Decode the encoded fragments", "Read the analyst note", "Submit the proof trail"],
-      flagRule: "Submit the TH{...} value referenced by the decoded DNS trail.",
+      flagRule: "Decode the DNS trail, normalize the phrase, then wrap it with TH{...}.",
     },
     "sudo-shadow": {
       start: "Start in sudo-l.txt. Read the allowed command and look for an argument pattern that changes command behavior.",
-      steps: ["Review allowed sudo command", "Find risky wildcard handling", "Follow the checkpoint-action note", "Submit the controlled proof"],
-      flagRule: "Submit the controlled proof printed by the sudo review.",
+      steps: ["Review allowed sudo command", "Find risky wildcard handling", "Follow the checkpoint-action note", "Build the controlled proof"],
+      flagRule: "Normalize the controlled proof phrase and wrap it with TH{...}.",
     },
     "bucket-signal": {
       start: "Start in bucket-metadata.json. Inspect public exposure and custom metadata fields.",
-      steps: ["Read bucket visibility", "Inspect metadata keys", "Find the training proof field", "Submit the metadata flag"],
-      flagRule: "Submit the TH{...} value stored in the metadata.",
+      steps: ["Read bucket visibility", "Inspect metadata keys", "Find the proof phrase", "Apply the proof format"],
+      flagRule: "Use the metadata proof phrase and format to build the TH{...} answer.",
     },
     "signal-trace": {
       start: "Start in trace.txt. Follow the comparison and branch notes like a small reverse-engineering trace.",
-      steps: ["Read the branch trace", "Find the target string", "Confirm the accepted format", "Submit the branch proof"],
-      flagRule: "Submit the operator branch target string.",
+      steps: ["Read the branch trace", "Find the target words", "Confirm the accepted format", "Build the branch proof"],
+      flagRule: "Normalize the branch target words and wrap them with TH{...}.",
     },
     "stack-postcard": {
       start: "Start in crash-notes.txt. Use the offset and target function note to understand what the exploit printed.",
-      steps: ["Read the crash offset", "Find the safe target function", "Read the printed proof", "Submit the control-flow flag"],
-      flagRule: "Submit the proof printed after controlled redirection.",
+      steps: ["Read the crash offset", "Find the safe target function", "Read the proof phrase", "Build the control-flow flag"],
+      flagRule: "Normalize the printed proof phrase and wrap it with TH{...}.",
     },
     "vault-reentry": {
       start: "Start in contract-review.sol. Compare the order of external calls and balance updates.",
-      steps: ["Read withdraw()", "Find the external call", "Check when balance changes", "Submit the review proof"],
-      flagRule: "Submit the proof comment from the contract review.",
+      steps: ["Read withdraw()", "Find the external call", "Check when balance changes", "Build the review proof"],
+      flagRule: "Normalize the review note and wrap it with TH{...}.",
     },
     "route-drift": {
       start: "Start in routes.txt. Compare each host's default gateway and TTL to find the one that does not match the baseline.",
-      steps: ["Compare route rows", "Find the drifting gateway", "Read the proof trail", "Submit the route flag"],
-      flagRule: "Submit the TH{...} proof trail from the route evidence.",
+      steps: ["Compare route rows", "Find the drifting gateway", "Read the proof phrase", "Apply the proof recipe"],
+      flagRule: "Normalize the route proof phrase and wrap it with TH{...}.",
     },
     "prompt-guard": {
       start: "Start in retrieval-context.md. Separate retrieved data from actual system instructions.",
-      steps: ["Read retrieved content", "Find instruction injection", "Identify the boundary failure", "Submit the boundary proof"],
-      flagRule: "Submit the boundary proof value from the evaluation note.",
+      steps: ["Read retrieved content", "Find instruction injection", "Identify the boundary failure", "Build the boundary proof"],
+      flagRule: "Normalize the boundary proof phrase and wrap it with TH{...}.",
     },
   };
 

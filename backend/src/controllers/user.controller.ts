@@ -27,6 +27,7 @@ export class UserController {
       xpFromSolved: solved.reduce((total, submission) => total + submission.awardedXp, 0),
       byCategory,
       byDifficulty,
+      solvedSlugs: solved.map((submission) => submission.challenge.slug),
       recentSolved: solved.slice(0, 6).map((submission) => ({
         slug: submission.challenge.slug,
         title: submission.challenge.title,
